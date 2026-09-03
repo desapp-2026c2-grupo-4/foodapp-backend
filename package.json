@@ -4,7 +4,8 @@
   "license": "MIT",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
   "description": "> Este repositorio es un fork de [otro que está en la organización surprograma](https://github.com/surprograma/nodejs-api-seed).   > El original es uno de los repositorios que se usan en la serie de videos **Tu primera aplicación full stack: NodeJS + React**, [disponible en YouTube](https://www.youtube.com/playlist?list=PL7q-McYJyHlgVGQIRYVKl381twyJ4XM_h).   > Mirar estos videos es una muy buena forma de entender un poco más sobre las tecnologías que van a usarse. :smiley: > > A continuación, transcribimos los comentarios del repo de surprograma. > En el medio, incluimos algunas aclaraciones que (creo) pueden venir bien en el contexto de la materia.",
   "bin": {
