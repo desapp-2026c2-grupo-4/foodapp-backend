@@ -1,4 +1,4 @@
-# Arquitectura del proyecto — Foodapp (Altoque)
+# Arquitectura del proyecto — Foodapp (BAJON)
 
 ## 1. Visión general y componentes principales
 
