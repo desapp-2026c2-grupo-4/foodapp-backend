@@ -10,6 +10,11 @@ const Pedido = require("./Pedido");
 const DetallePedido = require("./DetallePedido");
 const HistorialPedido = require("./HistorialPedido");
 const ProductoPedido = require("./ProductoPedido");
+const Empleado = require("./Empleado");
+const Opcional = require("./Opcional");
+const DetallePedidoOpcional = require("./DetallePedidoOpcional");
+const Promocion = require("./Promocion");
+const PromocionProducto = require("./PromocionProducto");
 
 // Cliente 1:N Direccion
 Cliente.hasMany(Direccion, { foreignKey: "id_cliente", as: "direcciones" });
@@ -82,6 +87,40 @@ Pedido.belongsToMany(Producto, {
   as: "productosProductoPedido",
 });
 
+// Empleado N:1 Sucursal
+Empleado.belongsTo(Sucursal, { foreignKey: "id_sucursal", as: "sucursal" });
+Sucursal.hasMany(Empleado, { foreignKey: "id_sucursal", as: "empleados" });
+
+// Producto 1:N Opcional (opcionales configurables por producto)
+Producto.hasMany(Opcional, { foreignKey: "id_producto", as: "opcionales" });
+Opcional.belongsTo(Producto, { foreignKey: "id_producto", as: "producto" });
+
+// DetallePedido 1:N DetallePedidoOpcional (opcionales seleccionados + snapshot precio)
+DetallePedido.hasMany(DetallePedidoOpcional, { foreignKey: "id_detalle", as: "opciones" });
+DetallePedidoOpcional.belongsTo(DetallePedido, { foreignKey: "id_detalle", as: "detalle" });
+
+// Opcional 1:N DetallePedidoOpcional
+Opcional.hasMany(DetallePedidoOpcional, { foreignKey: "id_opcional", as: "detallesUso" });
+DetallePedidoOpcional.belongsTo(Opcional, { foreignKey: "id_opcional", as: "opcional" });
+
+// Producto N:M Promocion via PromocionProducto (§5.16 AGENTS.md, promociones globales)
+Producto.belongsToMany(Promocion, {
+  through: PromocionProducto,
+  foreignKey: "id_producto",
+  otherKey: "id_promocion",
+  as: "promociones",
+});
+Promocion.belongsToMany(Producto, {
+  through: PromocionProducto,
+  foreignKey: "id_promocion",
+  otherKey: "id_producto",
+  as: "productos",
+});
+
+// DetallePedido N:1 Promocion (líneas generadas por una promo conservan su origen §5.16)
+DetallePedido.belongsTo(Promocion, { foreignKey: "id_promocion", as: "promocion" });
+Promocion.hasMany(DetallePedido, { foreignKey: "id_promocion", as: "detallesUso" });
+
 module.exports = {
   sequelize,
   Cliente,
@@ -95,4 +134,9 @@ module.exports = {
   DetallePedido,
   HistorialPedido,
   ProductoPedido,
+  Empleado,
+  Opcional,
+  DetallePedidoOpcional,
+  Promocion,
+  PromocionProducto,
 };

@@ -36,6 +36,14 @@ const DetallePedido = sequelize.define("DetallePedido", {
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  id_promocion: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: { model: "promociones", key: "id_promocion" },
+    onUpdate: "CASCADE",
+    onDelete: "SET NULL",
+    comment: "Promoción aplicada a esta línea (histórico §5.16). NULL = producto suelto",
+  },
 }, {
   tableName: "detalle_pedidos",
   timestamps: false,

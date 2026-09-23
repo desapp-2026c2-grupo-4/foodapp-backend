@@ -1,14 +1,29 @@
-const { Pedido, DetallePedido, HistorialPedido, Cliente, Sucursal, Direccion, Producto, sequelize } = require("../models");
+const { Pedido, DetallePedido, DetallePedidoOpcional, HistorialPedido, Cliente, Sucursal, Direccion, Producto, Opcional, Promocion, sequelize } = require("../models");
 const pedidoService = require("../services/pedidoService");
+
+// Flujo de estados en un solo sentido: Pendiente -> Confirmado -> Preparando -> En camino -> Entregado
+// No se permite volver a un estado anterior.
+const FLUJO_ESTADOS = ["Pendiente", "Confirmado", "Preparando", "En camino", "Entregado"];
 
 const getPedidos = async (req, res, next) => {
   try {
+    const where = {};
+    if (req.query.id_cliente) where.id_cliente = req.query.id_cliente;
     const pedidos = await Pedido.findAll({
+      where,
       include: [
         { model: Cliente, as: "cliente", attributes: ["id_cliente", "nombre", "apellido", "email"] },
         { model: Sucursal, as: "sucursal" },
         { model: Direccion, as: "direccion" },
-        { model: DetallePedido, as: "detalles", include: [{ model: Producto, as: "producto" }] },
+        {
+          model: DetallePedido,
+          as: "detalles",
+          include: [
+            { model: Producto, as: "producto" },
+            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
+            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+          ],
+        },
         { model: HistorialPedido, as: "historial" },
       ],
       order: [["id_pedido", "ASC"]],
@@ -26,7 +41,15 @@ const getPedidoById = async (req, res, next) => {
         { model: Cliente, as: "cliente", attributes: ["id_cliente", "nombre", "apellido", "email"] },
         { model: Sucursal, as: "sucursal" },
         { model: Direccion, as: "direccion" },
-        { model: DetallePedido, as: "detalles", include: [{ model: Producto, as: "producto" }] },
+        {
+          model: DetallePedido,
+          as: "detalles",
+          include: [
+            { model: Producto, as: "producto" },
+            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
+            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+          ],
+        },
         { model: HistorialPedido, as: "historial" },
       ],
     });
@@ -51,8 +74,16 @@ const updatePedido = async (req, res, next) => {
       return res.status(400).json({ error: "No se enviaron campos para actualizar" });
     }
 
-    // Si cambia estado, registrar en historial
+    // Si cambia estado, validar que la transición sea solo hacia adelante
     const estadoAnterior = pedido.estado;
+    if (datos.estado && datos.estado !== estadoAnterior) {
+      const idxAnterior = FLUJO_ESTADOS.indexOf(estadoAnterior);
+      const idxNuevo = FLUJO_ESTADOS.indexOf(datos.estado);
+      // Solo se valida cuando ambos estados pertenecen al flujo (Listo/Cancelado quedan fuera del flujo lineal)
+      if (idxAnterior !== -1 && idxNuevo !== -1 && idxNuevo !== idxAnterior + 1) {
+        return res.status(400).json({ error: `Transición no permitida: de "${estadoAnterior}" solo se puede avanzar a "${FLUJO_ESTADOS[idxAnterior + 1] || "—"}"` });
+      }
+    }
     await pedido.update(datos);
 
     if (datos.estado && datos.estado !== estadoAnterior) {
@@ -78,7 +109,15 @@ const updatePedido = async (req, res, next) => {
         { model: Cliente, as: "cliente", attributes: ["id_cliente", "nombre", "apellido", "email"] },
         { model: Sucursal, as: "sucursal" },
         { model: Direccion, as: "direccion" },
-        { model: DetallePedido, as: "detalles", include: [{ model: Producto, as: "producto" }] },
+        {
+          model: DetallePedido,
+          as: "detalles",
+          include: [
+            { model: Producto, as: "producto" },
+            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
+            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+          ],
+        },
         { model: HistorialPedido, as: "historial" },
       ],
     });
@@ -118,32 +157,80 @@ const createPedido = async (req, res, next) => {
       importe: 0,
     }, { transaction: t });
 
-    // Crear detalles + Producto_Pedido
+    // Crear detalles + Producto_Pedido + opcionales (+ promociones expandidas)
     const { ProductoPedido } = require("../models");
+    const promocionService = require("../services/promocionService");
     let importe = 0;
-    for (const item of detalles) {
-      const { id_producto, cantidad, observaciones } = item;
-      if (!id_producto || !cantidad || cantidad < 1) {
-        await t.rollback();
-        return res.status(400).json({ error: "Cada detalle requiere id_producto y cantidad >=1" });
-      }
-      const producto = await Producto.findByPk(id_producto, { transaction: t });
-      if (!producto) { await t.rollback(); return res.status(404).json({ error: `Producto ${id_producto} no encontrado` }); }
-      const precio = parseFloat(producto.precio); // snapshot histórico
-      await DetallePedido.create({
+
+    // Un item puede ser producto suelto {id_producto, ...} o promoción {id_promocion, cantidad, observaciones}
+    const crearLinea = async (id_producto, cantidad, precio, observaciones, id_promocion, opcionalesValidados) => {
+      const detalle = await DetallePedido.create({
         id_pedido: pedido.id_pedido,
         id_producto,
         cantidad,
         precio,
         observaciones: observaciones || null,
+        id_promocion: id_promocion || null,
       }, { transaction: t });
-      // Producto_Pedido N:M simple (§5.15) - si ya existe, ignorar conflicto
+      for (const opc of opcionalesValidados) {
+        await DetallePedidoOpcional.create({
+          id_detalle: detalle.id_detalle,
+          id_opcional: opc.id_opcional,
+          precio: opc.precio,
+        }, { transaction: t });
+      }
       await ProductoPedido.findOrCreate({
         where: { id_pedido: pedido.id_pedido, id_producto },
         defaults: { id_pedido: pedido.id_pedido, id_producto },
         transaction: t,
       });
-      importe += cantidad * precio;
+      importe += cantidad * parseFloat(precio);
+    };
+
+    for (const item of detalles) {
+      const { id_producto, id_promocion, cantidad, observaciones, opcionales } = item;
+      if (!cantidad || cantidad < 1) {
+        await t.rollback();
+        return res.status(400).json({ error: "Cada detalle requiere cantidad >=1" });
+      }
+      // Item de promoción: se expande en líneas con precio promocional distribuido
+      if (id_promocion) {
+        let lineas;
+        try {
+          lineas = await promocionService.expandirPromocion(id_promocion, cantidad, t);
+        } catch (err) {
+          await t.rollback();
+          return res.status(err.status || 500).json({ error: err.message });
+        }
+        for (const l of lineas) {
+          await crearLinea(l.id_producto, l.cantidad, l.precio, observaciones, l.id_promocion, []);
+        }
+        continue;
+      }
+      if (!id_producto) {
+        await t.rollback();
+        return res.status(400).json({ error: "Cada detalle requiere id_producto o id_promocion" });
+      }
+      const producto = await Producto.findByPk(id_producto, { transaction: t });
+      if (!producto) { await t.rollback(); return res.status(404).json({ error: `Producto ${id_producto} no encontrado` }); }
+      let precioBase = parseFloat(producto.precio); // snapshot histórico base
+      let precioOpcionales = 0;
+      // Validar opcionales si vienen (array de id_opcional)
+      let opcionalesValidados = [];
+      if (Array.isArray(opcionales) && opcionales.length > 0) {
+        for (const id_opc of opcionales) {
+          const opc = await Opcional.findByPk(id_opc, { transaction: t });
+          if (!opc) { await t.rollback(); return res.status(404).json({ error: `Opcional ${id_opc} no encontrado` }); }
+          if (opc.id_producto !== id_producto) {
+            await t.rollback();
+            return res.status(400).json({ error: `Opcional ${opc.nombre} no pertenece al producto ${producto.nombre}` });
+          }
+          opcionalesValidados.push(opc);
+          precioOpcionales += parseFloat(opc.precio);
+        }
+      }
+      const precioUnitario = precioBase + precioOpcionales; // incluye extras
+      await crearLinea(id_producto, cantidad, precioUnitario, observaciones, null, opcionalesValidados);
     }
     await pedido.update({ importe }, { transaction: t });
     await HistorialPedido.create({
@@ -158,7 +245,15 @@ const createPedido = async (req, res, next) => {
         { model: Cliente, as: "cliente", attributes: ["id_cliente", "nombre", "apellido", "email"] },
         { model: Sucursal, as: "sucursal" },
         { model: Direccion, as: "direccion" },
-        { model: DetallePedido, as: "detalles", include: [{ model: Producto, as: "producto" }] },
+        {
+          model: DetallePedido,
+          as: "detalles",
+          include: [
+            { model: Producto, as: "producto" },
+            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
+            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+          ],
+        },
         { model: HistorialPedido, as: "historial" },
       ],
     });
@@ -187,10 +282,14 @@ const getDetallesByPedidoId = async (req, res, next) => {
     if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
     const detalles = await DetallePedido.findAll({
       where: { id_pedido: req.params.id },
-      include: [{ model: Producto, as: "producto" }],
+      include: [
+        { model: Producto, as: "producto" },
+        { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
+        { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+      ],
       order: [["id_detalle", "ASC"]],
     });
-    // También devolver importe calculado para verificación: sum(cantidad*precio)
+    // También devolver importe calculado para verificación: sum(cantidad*precio) ya incluye opcionales en precio
     const importeCalculado = detalles.reduce((sum, d) => sum + d.cantidad * parseFloat(d.precio), 0);
     res.json({ id_pedido: pedido.id_pedido, importe: pedido.importe, importeCalculado, detalles });
   } catch (err) {

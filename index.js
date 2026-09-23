@@ -9,6 +9,11 @@ const errorMiddleware = require("./middlewares/errorMiddleware");
 const productoRoutes = require("./routes/productoRoutes");
 const sucursalRoutes = require("./routes/sucursalRoutes");
 const pedidoRoutes = require("./routes/pedidoRoutes");
+const clienteRoutes = require("./routes/clienteRoutes");
+const { router: opcionalRoutes } = require("./routes/opcionalRoutes");
+const categoriaRoutes = require("./routes/categoriaRoutes");
+const promocionRoutes = require("./routes/promocionRoutes");
+const reporteRoutes = require("./routes/reporteRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,8 +47,13 @@ app.get("/health", async (req, res) => {
 
 // Rutas API según AGENTS.md §8 - endpoints REST sin duplicar por rol
 app.use("/api/productos", productoRoutes);
+app.use("/api/opcionales", opcionalRoutes);
 app.use("/api/sucursales", sucursalRoutes);
 app.use("/api/pedidos", pedidoRoutes);
+app.use("/api/clientes", clienteRoutes);
+app.use("/api/categorias", categoriaRoutes);
+app.use("/api/promociones", promocionRoutes);
+app.use("/api/reportes", reporteRoutes);
 
 app.use(errorMiddleware);
 
