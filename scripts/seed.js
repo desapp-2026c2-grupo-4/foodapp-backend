@@ -12,7 +12,11 @@ const {
   DetallePedido,
   HistorialPedido,
   ProductoPedido,
+  Empleado,
+  Opcional,
+  DetallePedidoOpcional,
 } = require("../models");
+const promocionService = require("../services/promocionService");
 
 async function seed() {
   try {
@@ -123,6 +127,66 @@ async function seed() {
       { id_producto: productos[2].id_producto, id_pedido: pedidos[2].id_pedido },
     ]);
     console.log("Producto_Pedido: 3");
+
+    // 12. Opcionales (≤3 por producto, máx 3 totales para demo)
+    const opcionales = await Opcional.bulkCreate([
+      { nombre: "Extra queso", descripcion: "Porción extra de queso", precio: 500.00, id_producto: productos[0].id_producto },
+      { nombre: "Extra cheddar", descripcion: "Cheddar extra", precio: 400.00, id_producto: productos[1].id_producto },
+      { nombre: "Hielo extra", descripcion: "Más hielo", precio: 0.00, id_producto: productos[2].id_producto },
+    ], { returning: true });
+    console.log(`Opcionales: ${opcionales.length}`);
+
+    // 13. Empleado administrador (para selección admin en frontend)
+    await Empleado.bulkCreate([
+      { nombre: "Admin", apellido: "Principal", rol: "ADMIN", email: "admin@altoque.com", password: "hashed_admin", id_sucursal: sucursales[0].id_sucursal },
+    ]);
+    console.log("Empleados: 1 (admin)");
+
+    // 14. Ejemplo de opcionales en un pedido (pedido 1, detalle 1 con extra queso)
+    const detalle1 = await DetallePedido.findOne({ where: { id_pedido: pedidos[0].id_pedido } });
+    // Actualizar precio del detalle para incluir opcional (5500 + 500 = 6000) y recalcular importe
+    await detalle1.update({ precio: 6000.00 });
+    await DetallePedidoOpcional.create({ id_detalle: detalle1.id_detalle, id_opcional: opcionales[0].id_opcional, precio: opcionales[0].precio });
+    // Recalcular importe pedido 1: 1*6000=6000
+    await pedidos[0].update({ importe: 6000.00 });
+    console.log(`Pedido ${pedidos[0].id_pedido} actualizado con opcional ${opcionales[0].nombre} -> importe 6000`);
+
+    // 15. Promociones (§5.16, máx 3 para demo, vía service con transacción)
+    await promocionService.crearPromocion({
+      nombre: "Combo Bajón",
+      descripcion: "2 hamburguesas + papas + 2 gaseosas",
+      tipo: "PRECIO_FIJO",
+      valor: 12000,
+      fecha_inicio: "2026-01-01",
+      fecha_fin: "2027-12-31",
+      activa: true,
+      productos: [
+        { id_producto: productos[0].id_producto, cantidad: 2 },
+        { id_producto: productos[1].id_producto, cantidad: 1 },
+        { id_producto: productos[2].id_producto, cantidad: 2 },
+      ],
+    });
+    await promocionService.crearPromocion({
+      nombre: "2x1 Papas Grandes",
+      descripcion: "Llevás 2, pagás 1",
+      tipo: "DOS_POR_UNO",
+      valor: 0,
+      fecha_inicio: "2026-01-01",
+      fecha_fin: "2027-12-31",
+      activa: true,
+      productos: [{ id_producto: productos[1].id_producto, cantidad: 2 }],
+    });
+    await promocionService.crearPromocion({
+      nombre: "15% Hamburguesa",
+      descripcion: "Descuento desactivado de ejemplo",
+      tipo: "PORCENTAJE",
+      valor: 15,
+      fecha_inicio: "2026-01-01",
+      fecha_fin: "2027-12-31",
+      activa: false,
+      productos: [{ id_producto: productos[0].id_producto, cantidad: 1 }],
+    });
+    console.log("Promociones: 3");
 
     console.log("Seed completado exitosamente (<=3 por tabla)");
     process.exit(0);
