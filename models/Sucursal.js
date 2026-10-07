@@ -20,6 +20,7 @@ const Sucursal = sequelize.define("Sucursal", {
   altura: { type: DataTypes.STRING, allowNull: false },
   ciudad: { type: DataTypes.STRING, allowNull: false },
   provincia: { type: DataTypes.STRING, allowNull: false },
+  codigo_postal: { type: DataTypes.STRING, allowNull: true },
   latitud: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
   longitud: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
 }, {

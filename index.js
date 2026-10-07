@@ -12,8 +12,12 @@ const pedidoRoutes = require("./routes/pedidoRoutes");
 const clienteRoutes = require("./routes/clienteRoutes");
 const { router: opcionalRoutes } = require("./routes/opcionalRoutes");
 const categoriaRoutes = require("./routes/categoriaRoutes");
+const bannerRoutes = require("./routes/bannerRoutes");
 const promocionRoutes = require("./routes/promocionRoutes");
 const reporteRoutes = require("./routes/reporteRoutes");
+const authRoutes = require("./routes/authRoutes");
+const empleadoRoutes = require("./routes/empleadoRoutes");
+const stockRoutes = require("./routes/stockRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -52,8 +56,12 @@ app.use("/api/sucursales", sucursalRoutes);
 app.use("/api/pedidos", pedidoRoutes);
 app.use("/api/clientes", clienteRoutes);
 app.use("/api/categorias", categoriaRoutes);
+app.use("/api/banners", bannerRoutes);
 app.use("/api/promociones", promocionRoutes);
 app.use("/api/reportes", reporteRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/empleados", empleadoRoutes);
+app.use("/api/stock", stockRoutes);
 
 app.use(errorMiddleware);
 

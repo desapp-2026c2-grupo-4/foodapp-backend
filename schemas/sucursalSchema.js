@@ -11,6 +11,7 @@ const createSucursalSchema = Joi.object({
   altura: Joi.string().trim().min(1).max(50).required(),
   ciudad: Joi.string().trim().min(1).max(255).required(),
   provincia: Joi.string().trim().min(1).max(255).required(),
+  codigo_postal: Joi.string().trim().allow("", null).max(20),
   latitud: Joi.number().min(-90).max(90).allow(null),
   longitud: Joi.number().min(-180).max(180).allow(null),
 });
@@ -24,6 +25,7 @@ const updateSucursalSchema = Joi.object({
   altura: Joi.string().trim().min(1).max(50),
   ciudad: Joi.string().trim().min(1).max(255),
   provincia: Joi.string().trim().min(1).max(255),
+  codigo_postal: Joi.string().trim().allow("", null).max(20),
   latitud: Joi.number().min(-90).max(90).allow(null),
   longitud: Joi.number().min(-180).max(180).allow(null),
 }).min(1);

@@ -44,6 +44,12 @@ const DetallePedido = sequelize.define("DetallePedido", {
     onDelete: "SET NULL",
     comment: "Promoción aplicada a esta línea (histórico §5.16). NULL = producto suelto",
   },
+  preparado: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+    comment: "Item confirmado en preparación por el empleado",
+  },
 }, {
   tableName: "detalle_pedidos",
   timestamps: false,

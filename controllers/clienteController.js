@@ -1,4 +1,5 @@
 const { Cliente, Direccion } = require("../models");
+const { hashPassword, verificarPassword } = require("../utils/password");
 
 const getClientes = async (req, res, next) => {
   try {
@@ -27,7 +28,7 @@ const createCliente = async (req, res, next) => {
     const { nombre, apellido, tipo_doc, dni, email, password } = req.body;
     const existente = await Cliente.findOne({ where: { email } });
     if (existente) return res.status(409).json({ error: "El email ya está registrado" });
-    const cliente = await Cliente.create({ nombre, apellido, tipo_doc, dni, email, password });
+    const cliente = await Cliente.create({ nombre, apellido, tipo_doc, dni, email, password: await hashPassword(password) });
     const creado = await Cliente.findByPk(cliente.id_cliente, {
       attributes: ["id_cliente", "nombre", "apellido", "tipo_doc", "dni", "email"],
       include: [{ model: Direccion, as: "direcciones" }],
@@ -40,7 +41,8 @@ const updateCliente = async (req, res, next) => {
   try {
     const cliente = await Cliente.findByPk(req.params.id);
     if (!cliente) return res.status(404).json({ error: "Cliente no encontrado" });
-    const permitidos = ["nombre", "apellido", "tipo_doc", "dni", "email"];
+    // El email es la credencial de login y no se puede modificar
+    const permitidos = ["nombre", "apellido", "tipo_doc", "dni"];
     const datos = {};
     for (const k of permitidos) if (req.body[k] !== undefined) datos[k] = req.body[k];
     if (Object.keys(datos).length === 0) return res.status(400).json({ error: "No se enviaron campos para actualizar" });
@@ -53,4 +55,16 @@ const updateCliente = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getClientes, getClienteById, createCliente, updateCliente };
+const cambiarPassword = async (req, res, next) => {
+  try {
+    const cliente = await Cliente.findByPk(req.params.id);
+    if (!cliente) return res.status(404).json({ error: "Cliente no encontrado" });
+    const { passwordActual, passwordNueva } = req.body;
+    const ok = await verificarPassword(passwordActual, cliente.password);
+    if (!ok) return res.status(401).json({ error: "La contraseña actual es incorrecta" });
+    await cliente.update({ password: await hashPassword(passwordNueva) });
+    res.json({ mensaje: "Contraseña actualizada correctamente" });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getClientes, getClienteById, createCliente, updateCliente, cambiarPassword };
