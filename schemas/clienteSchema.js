@@ -14,7 +14,11 @@ const updateClienteSchema = Joi.object({
   apellido: Joi.string().trim().min(1).max(255),
   tipo_doc: Joi.string().trim().allow("", null).max(20),
   dni: Joi.string().trim().allow("", null).max(20),
-  email: Joi.string().trim().email().max(255),
 }).min(1);
 
-module.exports = { createClienteSchema, updateClienteSchema };
+const cambiarPasswordSchema = Joi.object({
+  passwordActual: Joi.string().min(1).max(255).required(),
+  passwordNueva: Joi.string().min(6).max(255).required(),
+});
+
+module.exports = { createClienteSchema, updateClienteSchema, cambiarPasswordSchema };

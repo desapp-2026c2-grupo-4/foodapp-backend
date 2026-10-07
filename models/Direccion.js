@@ -13,6 +13,7 @@ const Direccion = sequelize.define("Direccion", {
   departamento: { type: DataTypes.STRING, allowNull: true },
   ciudad: { type: DataTypes.STRING, allowNull: false },
   provincia: { type: DataTypes.STRING, allowNull: false },
+  codigo_postal: { type: DataTypes.STRING, allowNull: true },
   latitud: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
   longitud: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
   id_cliente: {

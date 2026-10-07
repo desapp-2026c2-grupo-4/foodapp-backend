@@ -48,10 +48,10 @@ Modelo: `Sucursal(id_sucursal, nombre, estado, telefono, horario, calle, altura,
 
 | Método | Ruta | Descripción | Body / Params | Response | Códigos |
 |--------|------|-------------|---------------|----------|---------|
-| GET | `/api/sucursales` | Lista con productos y stock | — | `[{id_sucursal, nombre, estado, telefono, horario, calle, altura, ciudad, provincia, latitud, longitud, productos:[{..., ProductoSucursal:{stock}}]}]` | 200 |
+| GET | `/api/sucursales` | Lista con productos y stock | — | `[{id_sucursal, nombre, estado, telefono, horario, calle, altura, ciudad, provincia, codigo_postal, latitud, longitud, productos:[{..., ProductoSucursal:{stock}}]}]` | 200 |
 | GET | `/api/sucursales/:id` | Detalle con productos | `id` param | mismo objeto o `404` | 200 / 404 `{error:"Sucursal no encontrada"}` |
-| POST | `/api/sucursales` | Crea sucursal | `{nombre*, calle*, altura*, ciudad*, provincia*, estado? (activa|inactiva|cerrada), telefono?, horario?, latitud?, longitud?}` | `201` sucursal con `productos` | 201 / 400 `nombre, calle, altura, ciudad y provincia son obligatorios` |
-| PUT | `/api/sucursales/:id` | Actualiza campos permitidos | `id` + `{nombre?, estado?, telefono?, horario?, calle?, altura?, ciudad?, provincia?, latitud?, longitud?}` | sucursal actualizada | 200 / 400 / 404 |
+| POST | `/api/sucursales` | Crea sucursal | `{nombre*, calle*, altura*, ciudad*, provincia*, estado? (activa|inactiva|cerrada), telefono?, horario?, codigo_postal?, latitud?, longitud?}` | `201` sucursal con `productos` | 201 / 400 `nombre, calle, altura, ciudad y provincia son obligatorios` |
+| PUT | `/api/sucursales/:id` | Actualiza campos permitidos | `id` + `{nombre?, estado?, telefono?, horario?, calle?, altura?, ciudad?, provincia?, codigo_postal?, latitud?, longitud?}` | sucursal actualizada | 200 / 400 / 404 |
 | DELETE | `/api/sucursales/:id` | Elimina (si no tiene pedidos/productos) | `id` | `{mensaje:"Sucursal eliminada"}` | 200 / 404 / 409 |
 
 **Ejemplo POST**
@@ -69,11 +69,12 @@ Modelo: `Pedido(id_pedido, fecha_hora, importe, estado, id_cliente, id_sucursal,
 
 | Método | Ruta | Descripción | Body / Params | Response | Códigos |
 |--------|------|-------------|---------------|----------|---------|
-| GET | `/api/pedidos` | Lista todos con cliente, sucursal, direccion, detalles+producto, historial | — | `[{id_pedido, fecha_hora, importe, estado, cliente:{id_cliente,nombre,apellido,email}, sucursal, direccion, detalles:[{id_detalle, cantidad, precio, observaciones, producto}], historial:[{id_historial, estado, fecha_hora}]}]` | 200 |
+| GET | `/api/pedidos` | Lista todos con cliente, sucursal, direccion, detalles+producto, historial. Filtros opcionales `?id_cliente=` y `?id_sucursal=` (empleados ven solo su sucursal) | query opcional | `[{id_pedido, fecha_hora, importe, estado, cliente:{id_cliente,nombre,apellido,email}, sucursal, direccion, detalles:[{id_detalle, cantidad, precio, observaciones, producto}], historial:[{id_historial, estado, fecha_hora}]}]` | 200 |
 | GET | `/api/pedidos/:id` | Detalle completo por id | `id` param | mismo objeto que arriba | 200 / 404 `{error:"Pedido no encontrado"}` |
 | GET | `/api/pedidos/:id/detalles` | Solo detalles + verificación importe | `id` param | `{id_pedido, importe, importeCalculado: SUM(cantidad*precio), detalles:[{..., producto}]}` | 200 / 404 |
-| POST | `/api/pedidos` | Crea pedido con transacción (carrito → pedido) | `{id_cliente*, id_direccion*, id_sucursal?, estado? (default Pendiente), detalles*: [{id_producto XOR id_promocion, cantidad* (>=1), observaciones?, opcionales?}]}`. Item con `id_promocion`: se valida vigencia y se expande en líneas (`DetallePedido` con `id_promocion` + precio promocional distribuido al centavo) | `201` pedido creado con includes (`detalles[].promocion`) + `importe = SUM(cantidad*precio)` y `Producto_Pedido` + `HistorialPedido` | 201 / 400 `id_cliente, id_direccion y detalles son obligatorios` / 400 `La dirección no pertenece al cliente` / 400 promo no vigente / 404 `Cliente/Direccion/Sucursal/Producto/Promoción no encontrado` |
-| PUT | `/api/pedidos/:id` | Actualiza estado/sucursal/importe (empleado) | `id` + `{estado?, id_sucursal?, importe?}` (al menos uno). `estado` en `Pendiente|Confirmado|Preparando|Listo|En camino|Entregado|Cancelado`. Si `estado` cambia crea `HistorialPedido`; `importe` se autocorrige a `SUM(cantidad*precio)` vía `services/pedidoService.js`. **Flujo en un solo sentido:** `Pendiente → Confirmado → Preparando → En camino → Entregado` — solo se permite avanzar al estado siguiente inmediato, sin volver atrás (`400 {error:"Transición no permitida..."}` en caso contrario) | pedido actualizado con includes | 200 / 400 / 404 |
+| POST | `/api/pedidos` | Crea pedido con transacción (carrito → pedido) | `{id_cliente*, id_direccion*, id_sucursal?, estado? (default Pendiente), detalles*: [{id_producto XOR id_promocion, cantidad* (>=1), observaciones?, opcionales?}]}`. Item con `id_promocion`: se valida vigencia y se expande en líneas (`DetallePedido` con `id_promocion` + precio promocional distribuido al centavo). **Asignación de sucursal:** si no se envía `id_sucursal`, el backend asigna la sucursal activa más cercana a la dirección (Haversine) con stock suficiente para todo el pedido (`services/sucursalService.js`); si ninguna alcanza → 409 | `201` pedido creado con includes (`detalles[].promocion`, `sucursal` asignada) + `importe = SUM(cantidad*precio)` y `Producto_Pedido` + `HistorialPedido` + descuento de stock de la sucursal | 201 / 400 `id_cliente, id_direccion y detalles son obligatorios` / 400 `La dirección no pertenece al cliente` / 400 promo no vigente / 400 dirección sin coordenadas / 404 `Cliente/Direccion/Sucursal/Producto/Promoción no encontrado` / 409 stock insuficiente (rollback total) |
+| PUT | `/api/pedidos/:id` | Actualiza estado/sucursal/importe (empleado) | `id` + `{estado?, id_sucursal?, importe?}` (al menos uno). `estado` en `Pendiente|Confirmado|Preparando|Listo|En camino|Entregado|Cancelado`. Si `estado` cambia crea `HistorialPedido`; `importe` se autocorrige a `SUM(cantidad*precio)` vía `services/pedidoService.js`. **Flujo en un solo sentido:** `Pendiente → Confirmado → Preparando → En camino → Entregado` — solo se permite avanzar al estado siguiente inmediato, sin volver atrás (`400 {error:"Transición no permitida..."}` en caso contrario). **Cancelación:** `Cancelado` es terminal (no admite más cambios, `400`) y no se puede cancelar un pedido `Entregado` (`400`); el cliente cancela desde Mis pedidos | pedido actualizado con includes | 200 / 400 / 404 |
+| PUT | `/api/pedidos/:id/detalles/:idDetalle` | Confirma item en preparación (empleado). Si todos los items quedan preparados, el pedido avanza solo a `En camino` + `HistorialPedido` | `{preparado*: boolean}` (solo válido si el pedido está en `Preparando`) | `{id_detalle, preparado, pedidoAvanzadoA: "En camino" \| null}` | 200 / 400 / 404 |
 | DELETE | `/api/pedidos/:id` | Elimina con CASCADE (detalles, historial, producto_pedido) | `id` | `{mensaje:"Pedido eliminado"}` | 200 / 404 |
 
 **Ejemplo POST (confirmar carrito desde `CartContext.jsx:32`)**
@@ -139,9 +140,104 @@ curl -X POST http://localhost:3000/api/promociones \
 
 ---
 
+## Banners — `/api/banners` (`routes/bannerRoutes.js`, `controllers/bannerController.js`)
+
+Modelo: `Banner(id_banner, titulo, descripcion, imagen, activo, orden)`. Se muestran arriba del catálogo, ordenados por `orden`.
+
+| Método | Ruta | Descripción | Body / Params | Response | Códigos |
+|--------|------|-------------|---------------|----------|---------|
+| GET | `/api/banners` | Lista ordenada por `orden` (filtro `?activo=true`) | `?activo=true` opcional | `[{id_banner, titulo, descripcion, imagen, activo, orden}]` | 200 |
+| GET | `/api/banners/:id` | Detalle | `id` param | mismo objeto que arriba | 200 / 404 `{error:"Banner no encontrado"}` |
+| POST | `/api/banners` | Crea (admin) | `{titulo*, imagen*, descripcion?, activo? (default true), orden? (default 0)}` | `201` banner creado | 201 / 400 Joi |
+| PUT | `/api/banners/:id` | Modifica (admin) | `id` + parcial (al menos un campo) | banner actualizado | 200 / 400 / 404 |
+| DELETE | `/api/banners/:id` | Elimina (admin) | `id` | `{mensaje:"Banner eliminado"}` | 200 / 404 |
+
+**Uso frontend:**
+- Catálogo: `CatalogPage.jsx` → `GET /api/banners?activo=true` → `BannerCarousel.jsx` arriba de todo.
+- Admin: `AdminBannersPage.jsx` → `POST/PUT/DELETE /api/banners` (alta, modificación, activación/desactivación, baja).
+
+---
+
+## Autenticación — `/api/auth` (`routes/authRoutes.js`, `controllers/authController.js`, `services/authService.js`)
+
+Registro público siempre crea **CLIENTE** (tabla `clientes`, sin campo rol). Contraseñas con bcrypt (`utils/password.js`); tokens JWT (`utils/jwt.js`, `JWT_SECRET` + `JWT_EXPIRES_IN` en `.env`). Login busca primero en clientes y luego en empleados; al primer login exitoso migra contraseñas viejas en texto plano a hash.
+
+| Método | Ruta | Descripción | Body / Params | Response | Códigos |
+|--------|------|-------------|---------------|----------|---------|
+| POST | `/api/auth/register` | Registro de cliente | `{nombre*, apellido*, tipo_doc?, dni?, email*, password* (mín. 6)}` (se ignora cualquier `rol` enviado) | `201 {token, user:{..., rol:"CLIENTE"}}` | 201 / 400 Joi / 409 email registrado |
+| POST | `/api/auth/login` | Login clientes y empleados | `{email*, password*}` | `{token, user}` (`rol: CLIENTE` o el `rol` del empleado) | 200 / 400 Joi / 401 credenciales inválidas |
+
+**Uso frontend:**
+- `LoginPage.jsx` (`/login`) → `POST /api/auth/login` → guarda token y redirige según rol (ADMIN → `/empleados/pedidos`, resto → `/catalogo`).
+- `RegisterPage.jsx` (`/registro`) → `POST /api/auth/register` → siempre CLIENTE.
+
+---
+
+## Empleados — `/api/empleados` (`routes/empleadoRoutes.js`, `controllers/empleadoController.js`)
+
+Modelo: `Empleado(id_empleado, nombre, apellido, rol, email, password, id_sucursal)` con `rol` en `ADMIN|REPARTIDOR|EMPLEADO`. La contraseña nunca se expone en respuestas. ABM solo desde administración; el administrador elige el rol al crear (incluye otros administradores). El rol EMPLEADO accede a lo mismo que ADMIN **menos** el ABM de empleados.
+
+| Método | Ruta | Descripción | Body / Params | Response | Códigos |
+|--------|------|-------------|---------------|----------|---------|
+| GET | `/api/empleados` | Lista con sucursal | — | `[{id_empleado, nombre, apellido, rol, email, id_sucursal, sucursal}]` | 200 |
+| GET | `/api/empleados/:id` | Detalle con sucursal | `id` param | mismo objeto que arriba | 200 / 404 |
+| POST | `/api/empleados` | Alta (admin) | `{nombre*, apellido*, rol* (ADMIN\|REPARTIDOR\|EMPLEADO), email?, password* (mín. 6), id_sucursal?}` | `201` empleado (sin password) | 201 / 400 Joi / 404 sucursal inexistente / 409 email registrado |
+| PUT | `/api/empleados/:id` | Modificación (admin, password opcional) | parcial (al menos un campo; password vacío = no cambiar) | empleado actualizado | 200 / 400 / 404 / 409 |
+| DELETE | `/api/empleados/:id` | Baja (admin) | `id` param | `{mensaje:"Empleado eliminado"}` | 200 / 404 |
+
+**Uso frontend:**
+- Admin: `AdminEmpleadosPage.jsx` (`/admin/empleados`) → `POST/PUT/DELETE /api/empleados`.
+
+---
+
+## Direcciones — `/api/clientes/:id/direcciones` (`routes/direccionRoutes.js`, `controllers/direccionController.js`)
+
+Modelo: `Direccion(id_direccion, calle, altura, piso, departamento, ciudad, provincia, codigo_postal, latitud, longitud, id_cliente)`. La dirección se elige en un mapa (OpenStreetMap + Leaflet) y se guarda como latitud/longitud; calle/altura/ciudad/provincia/CP se resuelven con geocodificación inversa (Nominatim) y se muestran como `calle altura, provincia (CP ...)`.
+
+| Método | Ruta | Descripción | Body / Params | Response | Códigos |
+|--------|------|-------------|---------------|----------|---------|
+| GET | `/api/clientes/:id/direcciones` | Lista del cliente | `id` param | `[{...direccion}]` | 200 / 404 cliente inexistente |
+| POST | `/api/clientes/:id/direcciones` | Alta | `{calle*, altura*, piso?, departamento?, ciudad*, provincia*, codigo_postal?, latitud* (-90..90), longitud* (-180..180)}` | `201` dirección creada | 201 / 400 Joi / 404 cliente inexistente |
+| DELETE | `/api/clientes/:id/direcciones/:idDireccion` | Baja (solo si es del cliente) | `id` + `idDireccion` params | `{mensaje:"Dirección eliminada"}` | 200 / 404 / 409 si se usa en pedidos |
+
+**Uso frontend:**
+- Registro: `RegisterPage.jsx` → mapa + `POST /api/clientes/:id/direcciones` tras crear la cuenta.
+- Perfil: `ProfilePage.jsx` (sección Mis direcciones) → alta con mapa y baja.
+
+---
+
+## Stock — `/api/stock` (`routes/stockRoutes.js`, `controllers/stockController.js`, `services/stockService.js`)
+
+Modelo: `Producto_Sucursal(id_producto, id_sucursal, stock)` — el stock pertenece a la combinación producto + sucursal. Al crear un pedido se descuenta el stock de su sucursal dentro de la misma transacción (falla con 409 y hace rollback si no alcanza; las promos descuentan sus líneas expandidas agregadas por producto).
+
+| Método | Ruta | Descripción | Body / Params | Response | Códigos |
+|--------|------|-------------|---------------|----------|---------|
+| GET | `/api/stock?sucursal=:id` | Productos con stock de una sucursal (0 si no hay fila) | query `sucursal*` | `[{id_producto, nombre, precio, estado, stock}]` | 200 / 404 sucursal inexistente |
+| POST | `/api/stock` | Suma stock (crea la fila si no existe) | `{id_sucursal*, id_producto*, cantidad* (entero >= 1)}` | `{id_sucursal, id_producto, nombre, stock}` | 200 / 400 Joi o cantidad inválida / 404 sucursal o producto inexistente |
+
+**Uso frontend:**
+- Empleado: `AdminProductsPage.jsx` (vista de stock de su sucursal) → `GET /api/stock?sucursal=` y `POST /api/stock` para agregar.
+
+---
+
+## Reportes — `/api/reportes` (`routes/reporteRoutes.js`, `controllers/reporteController.js`)
+
+Reporte de productos con unidades vendidas y facturación (precio histórico de cada detalle; incluye productos sin ventas con 0). Filtro opcional `?id_sucursal=` para acotar a los pedidos de una sucursal.
+
+| Método | Ruta | Descripción | Body / Params | Response | Códigos |
+|--------|------|-------------|---------------|----------|---------|
+| GET | `/api/reportes/productos` | Ventas por producto, global o por sucursal | query opcional `id_sucursal` | `[{id_producto, nombre, precio_actual, estado, unidades_vendidas, facturacion, cantidad_pedidos}]` | 200 / 404 sucursal inexistente |
+| GET | `/api/reportes/promociones` | Ventas por promoción, global o por sucursal. `unidades_vendidas` = combos vendidos (líneas expandidas / tamaño del combo); incluye promociones sin ventas con 0 | query opcional `id_sucursal` | `[{id_promocion, nombre, tipo, valor, activa, unidades_vendidas, facturacion, cantidad_pedidos}]` | 200 / 404 sucursal inexistente |
+
+**Uso frontend:**
+- Admin: `AdminReportesPage.jsx` → `GET /api/reportes/productos` y `GET /api/reportes/promociones` (global).
+- Empleado: `AdminReportesPage.jsx` → mismos endpoints con `?id_sucursal=` (solo su sucursal).
+
+---
+
 ## Notas comunes
 
 - **Content-Type:** `application/json` en POST/PUT.
-- **Variables:** `foodapp-frontend/.env` → `VITE_API_URL`; `foodapp-backend/.env` → `DATABASE_URL`, `PORT`.
+- **Variables:** `foodapp-frontend/.env` → `VITE_API_URL`; `foodapp-backend/.env` → `DATABASE_URL`, `PORT`, `JWT_SECRET`, `JWT_EXPIRES_IN`.
 - **Errores Sequelize:** validación/único → `400 {error: "mensajes"}`, FK → `409` en DELETE productos/sucursales.
-- **Sin autenticación aún:** rutas abiertas (empleados sin login por requerimiento actual, `AGENTS.md §7` pendiente JWT/bcrypt).
+- **Autenticación:** login con JWT implementado (`/api/auth/login`); la protección de rutas por rol con middleware queda pendiente (`AGENTS.md §7`).

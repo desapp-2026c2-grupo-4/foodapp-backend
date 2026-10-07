@@ -13,6 +13,7 @@ const ProductoPedido = require("./ProductoPedido");
 const Empleado = require("./Empleado");
 const Opcional = require("./Opcional");
 const DetallePedidoOpcional = require("./DetallePedidoOpcional");
+const Banner = require("./Banner");
 const Promocion = require("./Promocion");
 const PromocionProducto = require("./PromocionProducto");
 
@@ -137,6 +138,7 @@ module.exports = {
   Empleado,
   Opcional,
   DetallePedidoOpcional,
+  Banner,
   Promocion,
   PromocionProducto,
 };

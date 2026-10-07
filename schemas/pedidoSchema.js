@@ -24,4 +24,8 @@ const updatePedidoSchema = Joi.object({
   importe: Joi.number().min(0),
 }).min(1);
 
-module.exports = { createPedidoSchema, updatePedidoSchema };
+const updateDetallePreparadoSchema = Joi.object({
+  preparado: Joi.boolean().required(),
+});
+
+module.exports = { createPedidoSchema, updatePedidoSchema, updateDetallePreparadoSchema };
