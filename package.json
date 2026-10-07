@@ -8,7 +8,13 @@
     "dev": "nodemon index.js",
     "db:sync": "node scripts/sync.js",
     "db:sync:force": "node scripts/sync.js --force",
-    "db:seed": "node scripts/seed.js"
+    "db:seed": "node scripts/seed.js",
+    "test": "jest --runInBand"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "setupFiles": ["<rootDir>/test/setup.js"],
+    "testMatch": ["<rootDir>/test/**/*.test.js"]
   },
   "description": "> Este repositorio es un fork de [otro que está en la organización surprograma](https://github.com/surprograma/nodejs-api-seed).   > El original es uno de los repositorios que se usan en la serie de videos **Tu primera aplicación full stack: NodeJS + React**, [disponible en YouTube](https://www.youtube.com/playlist?list=PL7q-McYJyHlgVGQIRYVKl381twyJ4XM_h).   > Mirar estos videos es una muy buena forma de entender un poco más sobre las tecnologías que van a usarse. :smiley: > > A continuación, transcribimos los comentarios del repo de surprograma. > En el medio, incluimos algunas aclaraciones que (creo) pueden venir bien en el contexto de la materia.",
   "bin": {
@@ -30,11 +36,13 @@
   },
   "homepage": "https://github.com/desapp-2026c2-grupo-4/foodapp-backend#readme",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "helmet": "^8.3.0",
     "joi": "^18.2.9",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.23.0",
     "sequelize": "^6.37.8"
   },

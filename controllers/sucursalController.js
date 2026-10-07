@@ -29,7 +29,7 @@ const updateSucursal = async (req, res, next) => {
     const sucursal = await Sucursal.findByPk(req.params.id);
     if (!sucursal) return res.status(404).json({ error: "Sucursal no encontrada" });
 
-    const permitidos = ["nombre", "estado", "telefono", "horario", "calle", "altura", "ciudad", "provincia", "latitud", "longitud"];
+    const permitidos = ["nombre", "estado", "telefono", "horario", "calle", "altura", "ciudad", "provincia", "codigo_postal", "latitud", "longitud"];
     const datos = {};
     for (const key of permitidos) {
       if (req.body[key] !== undefined) datos[key] = req.body[key];
@@ -50,11 +50,11 @@ const updateSucursal = async (req, res, next) => {
 
 const createSucursal = async (req, res, next) => {
   try {
-    const { nombre, estado, telefono, horario, calle, altura, ciudad, provincia, latitud, longitud } = req.body;
+    const { nombre, estado, telefono, horario, calle, altura, ciudad, provincia, codigo_postal, latitud, longitud } = req.body;
     if (!nombre || !calle || !altura || !ciudad || !provincia) {
       return res.status(400).json({ error: "nombre, calle, altura, ciudad y provincia son obligatorios" });
     }
-    const sucursal = await Sucursal.create({ nombre, estado, telefono, horario, calle, altura, ciudad, provincia, latitud, longitud });
+    const sucursal = await Sucursal.create({ nombre, estado, telefono, horario, calle, altura, ciudad, provincia, codigo_postal: codigo_postal || null, latitud, longitud });
     const creada = await Sucursal.findByPk(sucursal.id_sucursal, {
       include: [{ model: Producto, as: "productos", through: { attributes: ["stock"] } }],
     });

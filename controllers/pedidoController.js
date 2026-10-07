@@ -1,4 +1,5 @@
 const { Pedido, DetallePedido, DetallePedidoOpcional, HistorialPedido, Cliente, Sucursal, Direccion, Producto, Opcional, Promocion, sequelize } = require("../models");
+const stockService = require("../services/stockService");
 const pedidoService = require("../services/pedidoService");
 
 // Flujo de estados en un solo sentido: Pendiente -> Confirmado -> Preparando -> En camino -> Entregado
@@ -9,6 +10,7 @@ const getPedidos = async (req, res, next) => {
   try {
     const where = {};
     if (req.query.id_cliente) where.id_cliente = req.query.id_cliente;
+    if (req.query.id_sucursal) where.id_sucursal = req.query.id_sucursal;
     const pedidos = await Pedido.findAll({
       where,
       include: [
@@ -77,9 +79,18 @@ const updatePedido = async (req, res, next) => {
     // Si cambia estado, validar que la transición sea solo hacia adelante
     const estadoAnterior = pedido.estado;
     if (datos.estado && datos.estado !== estadoAnterior) {
+      // Cancelado es terminal: un pedido cancelado no puede cambiar de estado
+      if (estadoAnterior === "Cancelado") {
+        return res.status(400).json({ error: 'No se puede cambiar el estado de un pedido cancelado' });
+      }
+      // Un pedido entregado no se puede cancelar
+      if (datos.estado === "Cancelado" && estadoAnterior === "Entregado") {
+        return res.status(400).json({ error: 'No se puede cancelar un pedido ya entregado' });
+      }
       const idxAnterior = FLUJO_ESTADOS.indexOf(estadoAnterior);
       const idxNuevo = FLUJO_ESTADOS.indexOf(datos.estado);
-      // Solo se valida cuando ambos estados pertenecen al flujo (Listo/Cancelado quedan fuera del flujo lineal)
+      // Solo se valida cuando ambos estados pertenecen al flujo (Listo queda fuera del flujo lineal;
+      // Cancelado se maneja con las reglas de arriba)
       if (idxAnterior !== -1 && idxNuevo !== -1 && idxNuevo !== idxAnterior + 1) {
         return res.status(400).json({ error: `Transición no permitida: de "${estadoAnterior}" solo se puede avanzar a "${FLUJO_ESTADOS[idxAnterior + 1] || "—"}"` });
       }
@@ -144,15 +155,25 @@ const createPedido = async (req, res, next) => {
       await t.rollback();
       return res.status(400).json({ error: "La dirección no pertenece al cliente" });
     }
-    if (id_sucursal) {
-      const suc = await Sucursal.findByPk(id_sucursal, { transaction: t });
+    let idSucursalFinal = id_sucursal || null;
+    if (idSucursalFinal) {
+      const suc = await Sucursal.findByPk(idSucursalFinal, { transaction: t });
       if (!suc) { await t.rollback(); return res.status(404).json({ error: "Sucursal no encontrada" }); }
+    } else {
+      // Sin sucursal explícita: asignar la más cercana a la dirección con stock suficiente
+      const sucursalService = require("../services/sucursalService");
+      try {
+        idSucursalFinal = await sucursalService.seleccionarSucursal({ direccion, detalles }, t);
+      } catch (err) {
+        await t.rollback();
+        return res.status(err.status || 500).json({ error: err.message });
+      }
     }
     // Crear pedido con importe 0 temporal
     const pedido = await Pedido.create({
       id_cliente,
       id_direccion,
-      id_sucursal: id_sucursal || null,
+      id_sucursal: idSucursalFinal,
       estado: estado || "Pendiente",
       importe: 0,
     }, { transaction: t });
@@ -232,6 +253,20 @@ const createPedido = async (req, res, next) => {
       const precioUnitario = precioBase + precioOpcionales; // incluye extras
       await crearLinea(id_producto, cantidad, precioUnitario, observaciones, null, opcionalesValidados);
     }
+    // Descontar stock de la sucursal según las líneas creadas (falla con 409 si no alcanza)
+    if (pedido.id_sucursal) {
+      const lineas = await DetallePedido.findAll({
+        where: { id_pedido: pedido.id_pedido },
+        attributes: ["id_producto", "cantidad"],
+        transaction: t,
+      });
+      try {
+        await stockService.descontarStock(lineas, pedido.id_sucursal, t);
+      } catch (err) {
+        await t.rollback();
+        return res.status(err.status || 500).json({ error: err.message });
+      }
+    }
     await pedido.update({ importe }, { transaction: t });
     await HistorialPedido.create({
       id_pedido: pedido.id_pedido,
@@ -297,4 +332,37 @@ const getDetallesByPedidoId = async (req, res, next) => {
   }
 };
 
-module.exports = { getPedidos, getPedidoById, updatePedido, createPedido, deletePedido, getDetallesByPedidoId };
+// PUT /api/pedidos/:id/detalles/:idDetalle - confirmar item en preparación
+// Si todos los items quedan preparados, el pedido avanza a "En camino"
+const updateDetallePreparado = async (req, res, next) => {
+  try {
+    const pedido = await Pedido.findByPk(req.params.id);
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (pedido.estado !== "Preparando") {
+      return res.status(400).json({ error: "Solo se pueden confirmar items de un pedido en preparación" });
+    }
+    const detalle = await DetallePedido.findOne({
+      where: { id_detalle: req.params.idDetalle, id_pedido: pedido.id_pedido },
+    });
+    if (!detalle) return res.status(404).json({ error: "Detalle no encontrado en el pedido" });
+    await detalle.update({ preparado: req.body.preparado });
+
+    let pedidoAvanzadoA = null;
+    const total = await DetallePedido.count({ where: { id_pedido: pedido.id_pedido } });
+    const pendientes = await DetallePedido.count({ where: { id_pedido: pedido.id_pedido, preparado: false } });
+    if (total > 0 && pendientes === 0) {
+      await pedido.update({ estado: "En camino" });
+      await HistorialPedido.create({
+        id_pedido: pedido.id_pedido,
+        estado: "En camino",
+        fecha_hora: new Date(),
+      });
+      pedidoAvanzadoA = "En camino";
+    }
+    res.json({ id_detalle: detalle.id_detalle, preparado: detalle.preparado, pedidoAvanzadoA });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { getPedidos, getPedidoById, updatePedido, createPedido, deletePedido, getDetallesByPedidoId, updateDetallePreparado };
