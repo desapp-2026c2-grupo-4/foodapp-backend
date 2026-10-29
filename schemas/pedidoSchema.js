@@ -20,7 +20,6 @@ const createPedidoSchema = Joi.object({
 
 const updatePedidoSchema = Joi.object({
   estado: Joi.string().valid(...ESTADOS),
-  id_sucursal: Joi.number().integer().positive().allow(null),
   importe: Joi.number().min(0),
 }).min(1);
 

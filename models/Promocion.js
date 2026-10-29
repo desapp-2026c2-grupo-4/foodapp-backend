@@ -47,6 +47,7 @@ const Promocion = sequelize.define("Promocion", {
   },
 }, {
   tableName: "promociones",
+  paranoid: true,
 });
 
 module.exports = Promocion;

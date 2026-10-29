@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/database");
 
-const ProductoSucursal = sequelize.define("ProductoSucursal", {
+const ProductoMateriaPrima = sequelize.define("ProductoMateriaPrima", {
   id_producto: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -10,23 +10,24 @@ const ProductoSucursal = sequelize.define("ProductoSucursal", {
     onUpdate: "CASCADE",
     onDelete: "CASCADE",
   },
-  id_sucursal: {
+  id_materia_prima: {
     type: DataTypes.INTEGER,
     primaryKey: true,
     allowNull: false,
-    references: { model: "sucursales", key: "id_sucursal" },
+    references: { model: "materias_primas", key: "id_materia_prima" },
     onUpdate: "CASCADE",
     onDelete: "CASCADE",
   },
-  stock: {
+  cantidad: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    defaultValue: 0,
-    validate: { min: 0 },
+    defaultValue: 1,
+    validate: { min: 1 },
+    comment: "Unidades de materia prima requeridas por unidad de producto",
   },
 }, {
-  tableName: "producto_sucursal",
+  tableName: "producto_materia_prima",
   timestamps: false,
 });
 
-module.exports = ProductoSucursal;
+module.exports = ProductoMateriaPrima;

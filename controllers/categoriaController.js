@@ -27,6 +27,15 @@ const getCategoriaById = async (req, res, next) => {
 const createCategoria = async (req, res, next) => {
   try {
     const { nombre } = req.body;
+    // Si existe una categoría dada de baja con el mismo nombre, se reutiliza (reactiva)
+    const existente = await Categoria.findOne({ where: { nombre }, paranoid: false });
+    if (existente) {
+      if (existente.deletedAt) {
+        await existente.restore();
+        return res.status(201).json(existente);
+      }
+      return res.status(409).json({ error: "Ya existe una categoría con ese nombre" });
+    }
     const categoria = await Categoria.create({ nombre });
     res.status(201).json(categoria);
   } catch (err) {
@@ -56,11 +65,8 @@ const deleteCategoria = async (req, res, next) => {
     const categoria = await Categoria.findByPk(req.params.id);
     if (!categoria) return res.status(404).json({ error: "Categoría no encontrada" });
     await categoria.destroy();
-    res.json({ mensaje: "Categoría eliminada" });
+    res.json({ mensaje: "Categoría dada de baja" });
   } catch (err) {
-    if (err.name === "SequelizeForeignKeyConstraintError") {
-      return res.status(409).json({ error: "No se puede eliminar la categoría porque tiene productos asociados" });
-    }
     next(err);
   }
 };

@@ -1,14 +1,17 @@
 const { sequelize, Promocion, PromocionProducto, Producto } = require("../models");
+const { TIMEZONE, fechaLocalISO, normalizarFechaISO } = require("../utils/dates");
 
 const TIPOS = ["PRECIO_FIJO", "PORCENTAJE", "DOS_POR_UNO"];
 
 /**
  * Indica si una promoción está vigente: activa y dentro de fecha_inicio/fecha_fin.
  */
-function estaVigente(promocion, fechaRef = new Date()) {
+function estaVigente(promocion, fechaRef = new Date(), timeZone = TIMEZONE) {
   if (!promocion || !promocion.activa) return false;
-  const hoy = fechaRef.toISOString().slice(0, 10);
-  return promocion.fecha_inicio <= hoy && hoy <= promocion.fecha_fin;
+  const hoy = fechaLocalISO(fechaRef, timeZone);
+  const inicio = normalizarFechaISO(promocion.fecha_inicio);
+  const fin = normalizarFechaISO(promocion.fecha_fin);
+  return inicio <= hoy && hoy <= fin;
 }
 
 /**
@@ -79,13 +82,15 @@ async function fetchCompleta(id_promocion, transaction) {
  * Crea una promoción con sus productos dentro de una transacción.
  */
 async function crearPromocion({ nombre, descripcion, imagen, tipo, valor, fecha_inicio, fecha_fin, activa = true, productos = [] }) {
-  validarVigencia(fecha_inicio, fecha_fin);
+  const inicio = normalizarFechaISO(fecha_inicio);
+  const fin = normalizarFechaISO(fecha_fin);
+  validarVigencia(inicio, fin);
   validarValorSegunTipo(tipo, valor);
   const t = await sequelize.transaction();
   try {
     await validarProductos(productos, t);
     const promocion = await Promocion.create(
-      { nombre, descripcion, imagen: imagen || null, tipo, valor, fecha_inicio, fecha_fin, activa },
+      { nombre, descripcion, imagen: imagen || null, tipo, valor, fecha_inicio: inicio, fecha_fin: fin, activa },
       { transaction: t }
     );
     for (const item of productos) {
@@ -112,16 +117,18 @@ async function modificarPromocion(id_promocion, { nombre, descripcion, imagen, t
     err.status = 404;
     throw err;
   }
+  const inicio = fecha_inicio === undefined ? undefined : normalizarFechaISO(fecha_inicio);
+  const fin = fecha_fin === undefined ? undefined : normalizarFechaISO(fecha_fin);
   const t = await sequelize.transaction();
   try {
     const datos = {};
-    for (const [k, v] of Object.entries({ nombre, descripcion, imagen, tipo, valor, fecha_inicio, fecha_fin, activa })) {
+    for (const [k, v] of Object.entries({ nombre, descripcion, imagen, tipo, valor, fecha_inicio: inicio, fecha_fin: fin, activa })) {
       if (v !== undefined) datos[k] = v;
     }
     const tipoFinal = datos.tipo ?? promocion.tipo;
     const valorFinal = datos.valor ?? promocion.valor;
     validarValorSegunTipo(tipoFinal, valorFinal);
-    validarVigencia(datos.fecha_inicio ?? promocion.fecha_inicio, datos.fecha_fin ?? promocion.fecha_fin);
+    validarVigencia(inicio ?? promocion.fecha_inicio, fin ?? promocion.fecha_fin);
     if (productos !== undefined) await validarProductos(productos, t);
     if (Object.keys(datos).length > 0) await promocion.update(datos, { transaction: t });
     if (productos !== undefined) {

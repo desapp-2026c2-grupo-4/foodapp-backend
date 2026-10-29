@@ -31,6 +31,7 @@ const Empleado = sequelize.define("Empleado", {
   },
 }, {
   tableName: "empleados",
+  paranoid: true,
 });
 
 module.exports = Empleado;

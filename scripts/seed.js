@@ -4,10 +4,13 @@ const {
   Cliente,
   Direccion,
   Sucursal,
+  SucursalHorario,
   Categoria,
   Producto,
   CategoriaProducto,
-  ProductoSucursal,
+  MateriaPrima,
+  ProductoMateriaPrima,
+  MateriaPrimaSucursal,
   Pedido,
   DetallePedido,
   HistorialPedido,
@@ -17,6 +20,7 @@ const {
   DetallePedidoOpcional,
 } = require("../models");
 const promocionService = require("../services/promocionService");
+const { hashPassword } = require("../utils/password");
 
 async function seed() {
   try {
@@ -53,28 +57,63 @@ async function seed() {
     ]);
     console.log("CategoriaProducto: 3 relaciones");
 
-    // 4. Sucursales (3)
+    // 4. Sucursales (3) + horarios por día
     const sucursales = await Sucursal.bulkCreate([
-      { nombre: "Centro", estado: "activa", telefono: "1140001111", horario: "10:00-23:00", calle: "Av. Rivadavia", altura: "1000", ciudad: "CABA", provincia: "Buenos Aires", latitud: -34.6083, longitud: -58.3712 },
-      { nombre: "Palermo", estado: "activa", telefono: "1140002222", horario: "11:00-00:00", calle: "Av. Santa Fe", altura: "3200", ciudad: "CABA", provincia: "Buenos Aires", latitud: -34.5885, longitud: -58.4120 },
-      { nombre: "Morón", estado: "activa", telefono: "1140003333", horario: "10:00-22:00", calle: "Belgrano", altura: "500", ciudad: "Morón", provincia: "Buenos Aires", latitud: -34.6500, longitud: -58.6200 },
+      { nombre: "Centro", estado: "activa", telefono: "1140001111", calle: "Av. Rivadavia", altura: "1000", ciudad: "CABA", provincia: "Buenos Aires", latitud: -34.6083, longitud: -58.3712, radio_km: 2 },
+      { nombre: "Palermo", estado: "activa", telefono: "1140002222", calle: "Av. Santa Fe", altura: "3200", ciudad: "CABA", provincia: "Buenos Aires", latitud: -34.5885, longitud: -58.4120, radio_km: 2 },
+      { nombre: "Morón", estado: "activa", telefono: "1140003333", calle: "Belgrano", altura: "500", ciudad: "Morón", provincia: "Buenos Aires", latitud: -34.6500, longitud: -58.6200, radio_km: 2 },
     ], { returning: true });
     console.log(`Sucursales: ${sucursales.length}`);
 
-    // 5. ProductoSucursal (stock) - 3*3 combinaciones pero limitado a 3 ejemplos según consigna: creamos 3 registros
-    // Para demostrar funcionalidad usamos 3 stocks significativos
-    await ProductoSucursal.bulkCreate([
-      { id_producto: productos[0].id_producto, id_sucursal: sucursales[0].id_sucursal, stock: 50 },
-      { id_producto: productos[1].id_producto, id_sucursal: sucursales[0].id_sucursal, stock: 30 },
-      { id_producto: productos[2].id_producto, id_sucursal: sucursales[1].id_sucursal, stock: 100 },
+    const todosLosDias = [1, 2, 3, 4, 5, 6, 7];
+    const horariosDemo = new Map([
+      ["Centro", todosLosDias.map((d) => ({ dia_semana: d, hora_apertura: "10:00", hora_cierre: "23:00" }))],
+      ["Palermo", todosLosDias.map((d) => ({ dia_semana: d, hora_apertura: "11:00", hora_cierre: "00:00" }))],
+      ["Morón", [1, 2, 3, 4, 5, 6].map((d) => ({ dia_semana: d, hora_apertura: "10:00", hora_cierre: "22:00" }))],
     ]);
-    console.log("ProductoSucursal: 3 registros de stock");
+    const horarios = await SucursalHorario.bulkCreate(
+      sucursales.flatMap((s) =>
+        (horariosDemo.get(s.nombre) || []).map((h) => ({ ...h, id_sucursal: s.id_sucursal }))
+      )
+    );
+    console.log(`SucursalHorario: ${horarios.length} registros`);
+
+    // 5. Materias primas (5) y stock por sucursal + receta por producto
+    const materias = await MateriaPrima.bulkCreate([
+      { nombre: "Pan", stock_minimo: 20 },
+      { nombre: "Carne", stock_minimo: 20 },
+      { nombre: "Papa", stock_minimo: 100 }, // queda por debajo del stock demo (90)
+      { nombre: "Queso", stock_minimo: 10 },
+      { nombre: "Gaseosa", stock_minimo: 30 },
+    ], { returning: true });
+    console.log(`Materias primas: ${materias.length}`);
+
+    // Receta (BOM): cantidad de materia prima por unidad de producto
+    await ProductoMateriaPrima.bulkCreate([
+      { id_producto: productos[0].id_producto, id_materia_prima: materias[0].id_materia_prima, cantidad: 1 }, // Pan
+      { id_producto: productos[0].id_producto, id_materia_prima: materias[1].id_materia_prima, cantidad: 1 }, // Carne
+      { id_producto: productos[0].id_producto, id_materia_prima: materias[3].id_materia_prima, cantidad: 1 }, // Queso
+      { id_producto: productos[1].id_producto, id_materia_prima: materias[2].id_materia_prima, cantidad: 3 }, // Papa x3
+      { id_producto: productos[2].id_producto, id_materia_prima: materias[4].id_materia_prima, cantidad: 1 }, // Gaseosa
+    ]);
+    console.log("ProductoMateriaPrima: 5 relaciones (receta)");
+
+    // Stock de materias primas por sucursal
+    await MateriaPrimaSucursal.bulkCreate([
+      { id_materia_prima: materias[0].id_materia_prima, id_sucursal: sucursales[0].id_sucursal, stock: 50 },
+      { id_materia_prima: materias[1].id_materia_prima, id_sucursal: sucursales[0].id_sucursal, stock: 50 },
+      { id_materia_prima: materias[3].id_materia_prima, id_sucursal: sucursales[0].id_sucursal, stock: 50 },
+      { id_materia_prima: materias[2].id_materia_prima, id_sucursal: sucursales[0].id_sucursal, stock: 90 },
+      { id_materia_prima: materias[4].id_materia_prima, id_sucursal: sucursales[1].id_sucursal, stock: 100 },
+    ]);
+    console.log("MateriaPrimaSucursal: 5 registros de stock");
 
     // 6. Clientes (3) - necesario para pedidos
+    const passwordCliente = await hashPassword("cliente123");
     const clientes = await Cliente.bulkCreate([
-      { nombre: "Juan", apellido: "Pérez", tipo_doc: "DNI", dni: "30111222", email: "juan.perez@example.com", password: "hashed_password_1" },
-      { nombre: "María", apellido: "Gómez", tipo_doc: "DNI", dni: "30222333", email: "maria.gomez@example.com", password: "hashed_password_2" },
-      { nombre: "Carlos", apellido: "López", tipo_doc: "DNI", dni: "30333444", email: "carlos.lopez@example.com", password: "hashed_password_3" },
+      { nombre: "Juan", apellido: "Pérez", tipo_doc: "DNI", dni: "30111222", email: "juan.perez@example.com", password: passwordCliente },
+      { nombre: "María", apellido: "Gómez", tipo_doc: "DNI", dni: "30222333", email: "maria.gomez@example.com", password: passwordCliente },
+      { nombre: "Carlos", apellido: "López", tipo_doc: "DNI", dni: "30333444", email: "carlos.lopez@example.com", password: passwordCliente },
     ], { returning: true });
     console.log(`Clientes: ${clientes.length}`);
 
@@ -136,11 +175,14 @@ async function seed() {
     ], { returning: true });
     console.log(`Opcionales: ${opcionales.length}`);
 
-    // 13. Empleado administrador (para selección admin en frontend)
+    // 13. Empleados demo: administrador global y empleado de sucursal
+    const passwordAdmin = await hashPassword("admin123");
+    const passwordEmpleado = await hashPassword("empleado123");
     await Empleado.bulkCreate([
-      { nombre: "Admin", apellido: "Principal", rol: "ADMIN", email: "admin@altoque.com", password: "hashed_admin", id_sucursal: sucursales[0].id_sucursal },
+      { nombre: "Admin", apellido: "Principal", rol: "ADMIN", email: "admin@altoque.com", password: passwordAdmin, id_sucursal: sucursales[0].id_sucursal },
+      { nombre: "Empleado", apellido: "Centro", rol: "EMPLEADO", email: "empleado@altoque.com", password: passwordEmpleado, id_sucursal: sucursales[0].id_sucursal },
     ]);
-    console.log("Empleados: 1 (admin)");
+    console.log("Empleados: 2 (admin + empleado)");
 
     // 14. Ejemplo de opcionales en un pedido (pedido 1, detalle 1 con extra queso)
     const detalle1 = await DetallePedido.findOne({ where: { id_pedido: pedidos[0].id_pedido } });

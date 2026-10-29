@@ -1,11 +1,33 @@
 const { sequelize, Sucursal } = require("../models");
+const { esAdmin, esEmpleado } = require("../utils/authz");
 
 // Reporte de productos: unidades vendidas y facturación por producto
 // (precio histórico de DetallePedido, incluye productos sin ventas con 0)
 // Filtro opcional ?id_sucursal= para acotar a los pedidos de una sucursal
+const resolverSucursalReporte = (req, res) => {
+  if (esEmpleado(req.user)) {
+    if (!req.user.id_sucursal) {
+      res.status(403).json({ error: "El usuario no tiene una sucursal asignada" });
+      return { error: true };
+    }
+    if (req.query.id_sucursal && Number(req.query.id_sucursal) !== Number(req.user.id_sucursal)) {
+      res.status(403).json({ error: "No podés consultar reportes de otra sucursal" });
+      return { error: true };
+    }
+    return { id_sucursal: req.user.id_sucursal };
+  }
+  if (!esAdmin(req.user)) {
+    res.status(403).json({ error: "No tenés permisos para consultar reportes" });
+    return { error: true };
+  }
+  return { id_sucursal: req.query.id_sucursal };
+};
+
 const getReporteProductos = async (req, res, next) => {
   try {
-    const { id_sucursal } = req.query;
+    const resuelto = resolverSucursalReporte(req, res);
+    if (resuelto.error) return;
+    const { id_sucursal } = resuelto;
     const replacements = {};
     let joinDetalles = `LEFT JOIN detalle_pedidos d ON d.id_producto = p.id_producto`;
     if (id_sucursal) {
@@ -26,6 +48,7 @@ const getReporteProductos = async (req, res, next) => {
         COUNT(DISTINCT d.id_pedido)::int AS cantidad_pedidos
       FROM productos p
       ${joinDetalles}
+      WHERE p.deleted_at IS NULL
       GROUP BY p.id_producto, p.nombre, p.precio, p.estado
       ORDER BY p.id_producto ASC
     `, { replacements });
@@ -47,7 +70,9 @@ const getReporteProductos = async (req, res, next) => {
 // Filtro opcional ?id_sucursal= para acotar a los pedidos de una sucursal
 const getReportePromociones = async (req, res, next) => {
   try {
-    const { id_sucursal } = req.query;
+    const resuelto = resolverSucursalReporte(req, res);
+    if (resuelto.error) return;
+    const { id_sucursal } = resuelto;
     const replacements = {};
     let joinDetalles = `LEFT JOIN detalle_pedidos d ON d.id_promocion = pr.id_promocion`;
     if (id_sucursal) {
@@ -76,6 +101,7 @@ const getReportePromociones = async (req, res, next) => {
         GROUP BY id_promocion
       ) b ON b.id_promocion = pr.id_promocion
       ${joinDetalles}
+      WHERE pr.deleted_at IS NULL
       GROUP BY pr.id_promocion, pr.nombre, pr.tipo, pr.valor, pr.activa, b.bundle_qty
       ORDER BY pr.id_promocion ASC
     `, { replacements });

@@ -46,7 +46,7 @@ const deletePromocion = async (req, res, next) => {
     const promocion = await Promocion.findByPk(req.params.id);
     if (!promocion) return res.status(404).json({ error: "Promoción no encontrada" });
     await promocion.destroy();
-    res.json({ mensaje: "Promoción eliminada" });
+    res.json({ mensaje: "Promoción dada de baja" });
   } catch (err) { next(err); }
 };
 
