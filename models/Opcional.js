@@ -37,6 +37,7 @@ const Opcional = sequelize.define("Opcional", {
   },
 }, {
   tableName: "opcionales",
+  paranoid: true,
 });
 
 module.exports = Opcional;

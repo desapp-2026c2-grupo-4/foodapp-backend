@@ -88,12 +88,11 @@ const deleteEmpleado = async (req, res, next) => {
   try {
     const empleado = await Empleado.findByPk(req.params.id);
     if (!empleado) return res.status(404).json({ error: "Empleado no encontrado" });
+    // Baja lógica: se libera el email único (para poder reutilizarlo) y se oculta el registro
+    await empleado.update({ email: null }, { validate: false });
     await empleado.destroy();
-    res.json({ mensaje: "Empleado eliminado" });
+    res.json({ mensaje: "Empleado dado de baja" });
   } catch (err) {
-    if (err.name === "SequelizeForeignKeyConstraintError") {
-      return res.status(409).json({ error: "No se puede eliminar el empleado" });
-    }
     next(err);
   }
 };

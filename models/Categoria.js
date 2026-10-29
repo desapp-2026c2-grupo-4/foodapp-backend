@@ -14,7 +14,11 @@ const Categoria = sequelize.define("Categoria", {
   },
 }, {
   tableName: "categorias",
-  timestamps: false,
+  // timestamps con createdAt/updatedAt desactivados: solo agrega deleted_at
+  timestamps: true,
+  createdAt: false,
+  updatedAt: false,
+  paranoid: true,
 });
 
 module.exports = Categoria;

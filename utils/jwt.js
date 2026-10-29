@@ -11,4 +11,6 @@ const getSecret = () => {
 const firmarToken = (payload) =>
   jwt.sign(payload, getSecret(), { expiresIn: process.env.JWT_EXPIRES_IN || "12h" });
 
-module.exports = { firmarToken };
+const verificarToken = (token) => jwt.verify(token, getSecret());
+
+module.exports = { firmarToken, verificarToken };

@@ -23,6 +23,7 @@ const Producto = sequelize.define("Producto", {
   },
 }, {
   tableName: "productos",
+  paranoid: true,
 });
 
 module.exports = Producto;

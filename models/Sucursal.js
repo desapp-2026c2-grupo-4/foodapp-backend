@@ -15,7 +15,6 @@ const Sucursal = sequelize.define("Sucursal", {
     validate: { isIn: [["activa", "inactiva", "cerrada"]] },
   },
   telefono: { type: DataTypes.STRING, allowNull: true },
-  horario: { type: DataTypes.STRING, allowNull: true },
   calle: { type: DataTypes.STRING, allowNull: false },
   altura: { type: DataTypes.STRING, allowNull: false },
   ciudad: { type: DataTypes.STRING, allowNull: false },
@@ -23,8 +22,15 @@ const Sucursal = sequelize.define("Sucursal", {
   codigo_postal: { type: DataTypes.STRING, allowNull: true },
   latitud: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
   longitud: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
+  radio_km: {
+    type: DataTypes.DECIMAL(6, 2),
+    allowNull: false,
+    defaultValue: 2.0,
+    validate: { min: 0.1, max: 100 },
+  },
 }, {
   tableName: "sucursales",
+  paranoid: true,
 });
 
 module.exports = Sucursal;

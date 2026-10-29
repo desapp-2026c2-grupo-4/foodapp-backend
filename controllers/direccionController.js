@@ -40,12 +40,8 @@ const deleteDireccion = async (req, res, next) => {
     });
     if (!direccion) return res.status(404).json({ error: "Dirección no encontrada" });
     await direccion.destroy();
-    res.json({ mensaje: "Dirección eliminada" });
+    res.json({ mensaje: "Dirección dada de baja" });
   } catch (err) {
-    const pgCode = err.parent && err.parent.code;
-    if (err.name === "SequelizeForeignKeyConstraintError" || pgCode === "23001" || pgCode === "23503") {
-      return res.status(409).json({ error: "No se puede eliminar una dirección usada en pedidos" });
-    }
     next(err);
   }
 };

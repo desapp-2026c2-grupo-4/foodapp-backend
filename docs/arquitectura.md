@@ -38,12 +38,13 @@ Frontend  --HTTP/REST JSON-->  Backend  --SQL via ORM/driver-->  Base de datos
 ### Base de datos
 
 - **Motor:** PostgreSQL (`DATABASE_URL` en `.env`, ej. `postgres://unahur:desarrollo@localhost:5432/bajon`)
-- **Tablas:** `clientes`, `direcciones`, `categorias`, `productos`, `categoria_producto`, `producto_sucursal` (stock), `sucursales`, `pedidos`, `detalle_pedidos`, `historial_pedidos`, `producto_pedido`
+- **Tablas:** `clientes`, `direcciones`, `categorias`, `productos`, `categoria_producto`, `materias_primas`, `producto_materia_prima` (receta), `materia_prima_sucursal` (stock), `sucursales`, `sucursal_horarios` (apertura/cierre por día), `pedidos`, `detalle_pedidos`, `historial_pedidos`, `producto_pedido`
+- **DER completo (20 tablas, 23 FKs):** [`der-foodapp.drawio`](./der-foodapp.drawio) (editable en diagrams.net, exportable a PNG/SVG) y versión Mermaid en [`der-foodapp.md`](./der-foodapp.md).
 - **Relaciones clave** (`AGENTS.md §5`, `models/index.js`):
   - `Cliente 1:N Direccion`, `Cliente 1:N Pedido`, `Direccion 1:N Pedido`
-  - `Producto N:M Categoria` (vía `categoria_producto`), `Producto N:M Sucursal` (vía `producto_sucursal` con `stock`)
+  - `Producto N:M Categoria` (vía `categoria_producto`), `Producto N:M MateriaPrima` (vía `producto_materia_prima` con `cantidad`), `MateriaPrima N:M Sucursal` (vía `materia_prima_sucursal` con `stock`)
   - `Producto N:M Pedido` (vía `producto_pedido` §5.15), `Pedido 1:N DetallePedido` (precio snapshot, cantidad, observaciones)
-  - `Pedido 1:N HistorialPedido` (`estado` + `fecha_hora`), `Sucursal 1:N Pedido`, `Producto 1:N DetallePedido`
+  - `Pedido 1:N HistorialPedido` (`estado` + `fecha_hora`), `Sucursal 1:N Pedido`, `Producto 1:N DetallePedido`, `Sucursal 1:N SucursalHorario` (`dia_semana` 1-7, `hora_apertura`, `hora_cierre`)
 
 ---
 
@@ -86,8 +87,8 @@ Fetch wrapper `src/services/api.js::apiFetch(path, options)`:
 
 1. `CatalogPage.jsx` hace `getProductos()` → `GET /api/productos` → renderiza `ProductCard.jsx`
 2. Usuario agrega/modifica cantidades en `CartContext.jsx` (`addProduct`, `updateQuantity`, `removeProduct`, `total = SUM precio*cantidad`)
-3. `CartPage.jsx` `confirmCart()` → `createPedido({id_cliente, id_direccion, id_sucursal, detalles:[{id_producto, cantidad, observaciones}]})` → `POST /api/pedidos`
-4. Backend `pedidoController.createPedido` valida cliente/dirección/sucursal, crea en transacción `Pedido` + `DetallePedido` (precio snapshot) + `ProductoPedido` + `HistorialPedido`, calcula `importe`, retorna `201` con `includes`
+3. `CartPage.jsx` `confirmCart()` → `createPedido({id_cliente, id_direccion, detalles:[{id_producto, cantidad, observaciones}]})` → `POST /api/pedidos` (sin `id_sucursal`: el backend la asigna)
+4. Backend `pedidoController.createPedido` valida cliente/dirección y resuelve la sucursal en `services/sucursalService.js` (si viene `id_sucursal`, exige que exista, esté activa, abierta y dentro de su `radio_km`; si no, elige la más cercana dentro de su radio con stock). Luego crea en transacción `Pedido` + `DetallePedido` (precio snapshot) + `ProductoPedido` + `HistorialPedido`, calcula `importe`, retorna `201` con `includes`
 5. Frontend muestra `OrderConfirmation.jsx` modal con N° pedido, fecha, estado, productos y total
 6. Empleado: `EmployeeOrdersPage.jsx` hace `getPedidos()` → `GET /api/pedidos` (con `includes` cliente, sucursal, direccion, detalles+producto, historial) → tabla; `EmployeeOrderDetailPage.jsx` hace `getPedidoById` → `PUT /api/pedidos/:id` para cambiar estado (`Pendiente`, `Confirmado`, `Preparando`, `En camino`, `Entregado`)
 
@@ -105,11 +106,11 @@ Dos mecanismos coexistentes (ambos usan misma `DATABASE_URL`):
 ### a) Sequelize ORM (principal, para modelo de dominio)
 
 - **Inicialización:** `config/database.js` crea `new Sequelize(DATABASE_URL, {dialect:"postgres", logging:false, define:{underscored:true, timestamps:true}})`
-- **Autenticación y sync:** `index.js` hace `sequelize.authenticate().then(...)`, `scripts/sync.js` hace `sequelize.sync({force})`
-- **Modelos:** cada archivo en `models/*.js` define `DataTypes`, `primaryKey`, referencias, validaciones, `tableName` (ej. `Producto` → `productos`, `Sucursal` → `sucursales`, `ProductoSucursal` composite PK, `ProductoPedido` única `[id_producto, id_pedido]`)
+- **Autenticación y sync:** `index.js` hace `sequelize.authenticate().then(...)`, `scripts/sync.js` hace `sequelize.sync({ alter: true })` o `{ force: true }` con `--force`
+- **Modelos:** cada archivo en `models/*.js` define `DataTypes`, `primaryKey`, referencias, validaciones, `tableName` (ej. `Producto` → `productos`, `Sucursal` → `sucursales`, `MateriaPrimaSucursal` composite PK, `ProductoPedido` única `[id_producto, id_pedido]`)
 - **Asociaciones:** `models/index.js` declara `hasMany`/`belongsTo`/`belongsToMany` (Cliente-Direccion, Pedido-Detalle, etc.) y exporta `{sequelize, Cliente, ...}`
 - **Consultas:** controllers usan `Model.findAll`/`findByPk`/`create`/`update`/`destroy` con `include` (eager loading) y `order`; `pedidoController.createPedido` usa `sequelize.transaction()` para atomicidad (crea `Pedido` con `importe 0`, inserta `DetallePedido` con precio de `Producto`, inserta `ProductoPedido` vía `findOrCreate`, recalcula `importe = SUM(cantidad*precio)`, `update Pedido`, crea `HistorialPedido`, `commit`/`rollback`)
-- **Validación y stock:** `ProductoSucursal` guarda `stock` por par (producto+sucursal), nunca en `CategoriaProducto`; precio en `DetallePedido` preserva histórico
+- **Validación y stock:** `MateriaPrimaSucursal` guarda `stock` por par (materia prima + sucursal), nunca en `CategoriaProducto`; el stock de un producto se deriva de su receta (`producto_materia_prima`) como `min(floor(stock_materia / cantidad_receta))`; precio en `DetallePedido` preserva histórico
 
 ### b) Pool `pg` directo (secundario, para health check)
 

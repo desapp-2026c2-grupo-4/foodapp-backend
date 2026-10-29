@@ -21,14 +21,15 @@ Cliente frontend: `foodapp-frontend/src/services/api.js` (`VITE_API_URL` → `ht
 
 ## Productos — `/api/productos` (`routes/productoRoutes.js`, `controllers/productoController.js`)
 
-Modelo: `Producto(id_producto, nombre, descripcion, precio, imagen, estado)` (`models/Producto.js`) + relaciones `Categoria N:M` y `Sucursal N:M (stock)`.
+Modelo: `Producto(id_producto, nombre, descripcion, precio, imagen, estado)` (`models/Producto.js`) + relaciones `Categoria N:M` y `MateriaPrima N:M (receta: cantidad por unidad)`.
 
 | Método | Ruta | Descripción | Body / Params | Response | Códigos |
 |--------|------|-------------|---------------|----------|---------|
-| GET | `/api/productos` | Lista todos con categorías y sucursales con stock | — | `[{id_producto, nombre, descripcion, precio, imagen, estado, createdAt, updatedAt, categorias:[{id_categoria,nombre}], sucursales:[{..., ProductoSucursal:{stock}}]}]` | 200 |
+| GET | `/api/productos` | Lista todos con categorías, receta y opcionales | — | `[{id_producto, nombre, descripcion, precio, imagen, estado, createdAt, updatedAt, categorias:[{id_categoria,nombre}], materiasPrimas:[{id_materia_prima,nombre, ProductoMateriaPrima:{cantidad}}], opcionales:[...]}]` | 200 |
 | GET | `/api/productos/:id` | Detalle por id con relaciones | `id` param | mismo objeto que arriba o `404` | 200 / 404 `{error:"Producto no encontrado"}` |
-| POST | `/api/productos` | Crea producto (empleado/admin) | `{nombre* , precio* , descripcion?, imagen?, estado? (disponible|no_disponible|pausado), categorias?:[id_categoria]}` | `201` producto creado con `categorias` y `sucursales` | 201 / 400 `nombre y precio son obligatorios` / 400 validación Sequelize |
-| PUT | `/api/productos/:id` | Actualiza campos permitidos | `id` param + `{nombre?, descripcion?, precio?, imagen?, estado?}` (al menos uno) | producto actualizado con includes | 200 / 400 `No se enviaron campos...` / 404 |
+| GET | `/api/productos/:id/stock` | Stock derivado de la receta en una sucursal | `id` param + query `sucursal*` | `{id_producto, id_sucursal, stock}` (`min(floor(stock_materia/cantidad_receta))`, 0 si no tiene receta) | 200 / 400 sin `sucursal` / 404 |
+| POST | `/api/productos` | Crea producto (empleado/admin) | `{nombre* , precio* , descripcion?, imagen?, estado? (disponible|no_disponible|pausado), categorias?:[id_categoria], materiasPrimas?:[{id_materia_prima, cantidad>=1}]}` | `201` producto creado con includes | 201 / 400 `nombre y precio son obligatorios` / 400 receta inválida / 404 |
+| PUT | `/api/productos/:id` | Actualiza campos permitidos (reemplaza categorías y receta si se envían) | `id` param + `{nombre?, descripcion?, precio?, imagen?, estado?, categorias?, materiasPrimas?}` (al menos uno) | producto actualizado con includes | 200 / 400 `No se enviaron campos...` / 400 receta inválida / 404 |
 | DELETE | `/api/productos/:id` | Elimina producto | `id` param | `{mensaje:"Producto eliminado"}` | 200 / 404 / 409 `{error:"No se puede eliminar producto con pedidos asociados"}` (FK `detalle_pedidos` RESTRICT) |
 
 **Ejemplo POST**
@@ -44,21 +45,27 @@ curl -X POST http://localhost:3000/api/productos \
 
 ## Sucursales — `/api/sucursales` (`routes/sucursalRoutes.js`, `controllers/sucursalController.js`)
 
-Modelo: `Sucursal(id_sucursal, nombre, estado, telefono, horario, calle, altura, ciudad, provincia, latitud, longitud)` (`models/Sucursal.js`) con dirección embebida (`AGENTS.md §5.8`).
+Modelo: `Sucursal(id_sucursal, nombre, estado, telefono, calle, altura, ciudad, provincia, latitud, longitud, radio_km)` (`models/Sucursal.js`) con dirección embebida (`AGENTS.md §5.8`) + `SucursalHorario(id_horario, id_sucursal, dia_semana, hora_apertura, hora_cierre)` (`models/SucursalHorario.js`).
+
+- `radio_km`: radio de cobertura en kilómetros. Default `2.00`; rango permitido `0.1–100`. Se usa para la autoasignación y para validar una sucursal explícita.
+- `dia_semana`: 1 = lunes … 7 = domingo.
+- `hora_apertura`/`hora_cierre`: `HH:MM` (se almacenan como `TIME`). Si el cierre es menor o igual a la apertura, el rango cruza la medianoche (ej. `20:00–02:00`).
+- Sin horarios cargados ⇒ la sucursal se considera **abierta siempre**.
+- `abierta_ahora` se calcula en cada respuesta: `estado === "activa"` y el horario actual dentro del rango (zona `SCHEDULE_TIMEZONE`, por defecto `America/Argentina/Buenos_Aires`). No se persiste.
 
 | Método | Ruta | Descripción | Body / Params | Response | Códigos |
 |--------|------|-------------|---------------|----------|---------|
-| GET | `/api/sucursales` | Lista con productos y stock | — | `[{id_sucursal, nombre, estado, telefono, horario, calle, altura, ciudad, provincia, codigo_postal, latitud, longitud, productos:[{..., ProductoSucursal:{stock}}]}]` | 200 |
-| GET | `/api/sucursales/:id` | Detalle con productos | `id` param | mismo objeto o `404` | 200 / 404 `{error:"Sucursal no encontrada"}` |
-| POST | `/api/sucursales` | Crea sucursal | `{nombre*, calle*, altura*, ciudad*, provincia*, estado? (activa|inactiva|cerrada), telefono?, horario?, codigo_postal?, latitud?, longitud?}` | `201` sucursal con `productos` | 201 / 400 `nombre, calle, altura, ciudad y provincia son obligatorios` |
-| PUT | `/api/sucursales/:id` | Actualiza campos permitidos | `id` + `{nombre?, estado?, telefono?, horario?, calle?, altura?, ciudad?, provincia?, codigo_postal?, latitud?, longitud?}` | sucursal actualizada | 200 / 400 / 404 |
+| GET | `/api/sucursales` | Lista con materias primas, stock y horarios | — | `[{id_sucursal, nombre, estado, telefono, calle, altura, ciudad, provincia, codigo_postal, latitud, longitud, radio_km, horarios:[{id_horario, dia_semana, hora_apertura, hora_cierre}], abierta_ahora, materiasPrimas:[{id_materia_prima, nombre, MateriaPrimaSucursal:{stock}}]}]` | 200 |
+| GET | `/api/sucursales/:id` | Detalle con horarios y materias primas | `id` param | mismo objeto o `404` | 200 / 404 `{error:"Sucursal no encontrada"}` |
+| POST | `/api/sucursales` | Crea sucursal y sus horarios | `{nombre*, calle*, altura*, ciudad*, provincia*, estado? (activa|inactiva|cerrada), telefono?, horarios?: [{dia_semana* (1-7), hora_apertura* (HH:MM), hora_cierre* (HH:MM)}], codigo_postal?, latitud?, longitud?, radio_km? (0.1-100, default 2)}` | `201` sucursal con `horarios`, `abierta_ahora` y materias primas | 201 / 400 Joi (`nombre, calle, altura, ciudad y provincia son obligatorios`; días duplicados; apertura = cierre; radio fuera de rango) |
+| PUT | `/api/sucursales/:id` | Actualiza campos permitidos; si llega `horarios` reemplaza todos | `id` + `{nombre?, estado?, telefono?, horarios?, calle?, altura?, ciudad?, provincia?, codigo_postal?, latitud?, longitud?, radio_km?}` | sucursal actualizada | 200 / 400 / 404 |
 | DELETE | `/api/sucursales/:id` | Elimina (si no tiene pedidos/productos) | `id` | `{mensaje:"Sucursal eliminada"}` | 200 / 404 / 409 |
 
 **Ejemplo POST**
 ```bash
 curl -X POST http://localhost:3000/api/sucursales \
   -H "Content-Type: application/json" \
-  -d '{"nombre":"Test Sur","calle":"Av Test","altura":"999","ciudad":"CABA","provincia":"Buenos Aires","estado":"activa"}'
+  -d '{"nombre":"Test Sur","calle":"Av Test","altura":"999","ciudad":"CABA","provincia":"Buenos Aires","estado":"activa","radio_km":2,"horarios":[{"dia_semana":1,"hora_apertura":"10:00","hora_cierre":"23:00"},{"dia_semana":2,"hora_apertura":"10:00","hora_cierre":"23:00"}]}'
 ```
 
 ---
@@ -72,8 +79,8 @@ Modelo: `Pedido(id_pedido, fecha_hora, importe, estado, id_cliente, id_sucursal,
 | GET | `/api/pedidos` | Lista todos con cliente, sucursal, direccion, detalles+producto, historial. Filtros opcionales `?id_cliente=` y `?id_sucursal=` (empleados ven solo su sucursal) | query opcional | `[{id_pedido, fecha_hora, importe, estado, cliente:{id_cliente,nombre,apellido,email}, sucursal, direccion, detalles:[{id_detalle, cantidad, precio, observaciones, producto}], historial:[{id_historial, estado, fecha_hora}]}]` | 200 |
 | GET | `/api/pedidos/:id` | Detalle completo por id | `id` param | mismo objeto que arriba | 200 / 404 `{error:"Pedido no encontrado"}` |
 | GET | `/api/pedidos/:id/detalles` | Solo detalles + verificación importe | `id` param | `{id_pedido, importe, importeCalculado: SUM(cantidad*precio), detalles:[{..., producto}]}` | 200 / 404 |
-| POST | `/api/pedidos` | Crea pedido con transacción (carrito → pedido) | `{id_cliente*, id_direccion*, id_sucursal?, estado? (default Pendiente), detalles*: [{id_producto XOR id_promocion, cantidad* (>=1), observaciones?, opcionales?}]}`. Item con `id_promocion`: se valida vigencia y se expande en líneas (`DetallePedido` con `id_promocion` + precio promocional distribuido al centavo). **Asignación de sucursal:** si no se envía `id_sucursal`, el backend asigna la sucursal activa más cercana a la dirección (Haversine) con stock suficiente para todo el pedido (`services/sucursalService.js`); si ninguna alcanza → 409 | `201` pedido creado con includes (`detalles[].promocion`, `sucursal` asignada) + `importe = SUM(cantidad*precio)` y `Producto_Pedido` + `HistorialPedido` + descuento de stock de la sucursal | 201 / 400 `id_cliente, id_direccion y detalles son obligatorios` / 400 `La dirección no pertenece al cliente` / 400 promo no vigente / 400 dirección sin coordenadas / 404 `Cliente/Direccion/Sucursal/Producto/Promoción no encontrado` / 409 stock insuficiente (rollback total) |
-| PUT | `/api/pedidos/:id` | Actualiza estado/sucursal/importe (empleado) | `id` + `{estado?, id_sucursal?, importe?}` (al menos uno). `estado` en `Pendiente|Confirmado|Preparando|Listo|En camino|Entregado|Cancelado`. Si `estado` cambia crea `HistorialPedido`; `importe` se autocorrige a `SUM(cantidad*precio)` vía `services/pedidoService.js`. **Flujo en un solo sentido:** `Pendiente → Confirmado → Preparando → En camino → Entregado` — solo se permite avanzar al estado siguiente inmediato, sin volver atrás (`400 {error:"Transición no permitida..."}` en caso contrario). **Cancelación:** `Cancelado` es terminal (no admite más cambios, `400`) y no se puede cancelar un pedido `Entregado` (`400`); el cliente cancela desde Mis pedidos | pedido actualizado con includes | 200 / 400 / 404 |
+| POST | `/api/pedidos` | Crea pedido con transacción (carrito → pedido) | `{id_cliente*, id_direccion*, id_sucursal?, estado? (default Pendiente), detalles*: [{id_producto XOR id_promocion, cantidad* (>=1), observaciones?, opcionales?}]}`. Item con `id_promocion`: se valida vigencia y se expande en líneas (`DetallePedido` con `id_promocion` + precio promocional distribuido al centavo). **Asignación de sucursal:** si no se envía `id_sucursal`, el backend asigna la sucursal **activa y abierta en ese momento**, **dentro de su `radio_km`** y más cercana a la dirección (Haversine) con stock suficiente para todo el pedido (`services/sucursalService.js`); si ninguna cumple → 409. Si se envía `id_sucursal`, se valida que exista, esté `activa`, abierta según sus horarios y dentro de su radio de cobertura; el stock se valida al descontar. Si no cumple → 400/409 (no se aplica cercanía) | `201` pedido creado con includes (`detalles[].promocion`, `sucursal` asignada) + `importe = SUM(cantidad*precio)` y `Producto_Pedido` + `HistorialPedido` + descuento de stock de la sucursal | 201 / 400 `id_cliente, id_direccion y detalles son obligatorios` / 400 `La dirección no pertenece al cliente` / 400 promo no vigente / 400 dirección sin coordenadas / 404 `Cliente/Direccion/Sucursal/Producto/Promoción no encontrado` / 409 stock insuficiente, sucursal fuera de radio o sucursal explícita no habilitada/fuera de horario (rollback total) |
+| PUT | `/api/pedidos/:id` | Actualiza estado/importe (empleado). La sucursal no se puede modificar después de crear el pedido: enviar `id_sucursal` devuelve 400 | `id` + `{estado?, importe?}` (al menos uno). `estado` en `Pendiente|Confirmado|Preparando|Listo|En camino|Entregado|Cancelado`. Si `estado` cambia crea `HistorialPedido`; `importe` se autocorrige a `SUM(cantidad*precio)` vía `services/pedidoService.js`. **Flujo en un solo sentido:** `Pendiente → Confirmado → Preparando → En camino → Entregado` — solo se permite avanzar al estado siguiente inmediato, sin volver atrás (`400 {error:"Transición no permitida..."}` en caso contrario). **Cancelación:** `Cancelado` es terminal (no admite más cambios, `400`) y no se puede cancelar un pedido `Entregado` (`400`); el cliente cancela desde Mis pedidos | pedido actualizado con includes | 200 / 400 / 404 |
 | PUT | `/api/pedidos/:id/detalles/:idDetalle` | Confirma item en preparación (empleado). Si todos los items quedan preparados, el pedido avanza solo a `En camino` + `HistorialPedido` | `{preparado*: boolean}` (solo válido si el pedido está en `Preparando`) | `{id_detalle, preparado, pedidoAvanzadoA: "En camino" \| null}` | 200 / 400 / 404 |
 | DELETE | `/api/pedidos/:id` | Elimina con CASCADE (detalles, historial, producto_pedido) | `id` | `{mensaje:"Pedido eliminado"}` | 200 / 404 |
 
@@ -92,6 +99,7 @@ curl -X POST http://localhost:3000/api/pedidos \
   }'
 # -> 201 {"id_pedido":4,"importe":"12800.00","estado":"Pendiente", "detalles":[...], "historial":[...]}
 # importe = 2*5500 + 1*1800 = 12800
+# id_sucursal es opcional; si se envía debe existir, estar activa, abierta y dentro de su radio_km (si no, 409)
 ```
 
 **Ejemplo PUT (empleado cambia estado)**
@@ -120,11 +128,13 @@ curl http://localhost:3000/api/pedidos/3/detalles # solo detalles + importeCalcu
 
 Modelo: `Promocion(id_promocion, nombre, descripcion, tipo, valor, fecha_inicio, fecha_fin, activa)` + `Promocion_Producto(id_promocion_producto, id_promocion, id_producto, cantidad)` (§5.16). Tipos: `PRECIO_FIJO` (precio final del conjunto), `PORCENTAJE` (0–100 % descuento), `DOS_POR_UNO` (de cada par se paga 1). Promociones globales (sin `Promocion_Sucursal`). Lógica en `promocionService` con transacciones; `GET` agrega `vigente` (activa + dentro de vigencia).
 
+**Contrato de fechas:** `fecha_inicio` y `fecha_fin` se envían y devuelven como `YYYY-MM-DD`, sin hora ni offset. `fecha_hora` de pedidos e historial se serializa en ISO 8601 UTC. La UI muestra fechas como `DD/MM/YYYY` y fecha/hora como `DD/MM/YYYY HH:mm` (24 h, `America/Argentina/Buenos_Aires`).
+
 | Método | Ruta | Descripción | Body / Params | Response | Códigos |
 |--------|------|-------------|---------------|----------|---------|
 | GET | `/api/promociones` | Lista con productos y cantidades | — | `[{id_promocion, nombre, descripcion, tipo, valor, fecha_inicio, fecha_fin, activa, vigente, productos:[{..., PromocionProducto:{cantidad}}]}]` | 200 |
 | GET | `/api/promociones/:id` | Detalle con productos | `id` param | mismo objeto que arriba | 200 / 404 `{error:"Promoción no encontrada"}` |
-| POST | `/api/promociones` | Crea con transacción (admin) | `{nombre*, tipo* (PRECIO_FIJO\|PORCENTAJE\|DOS_POR_UNO), valor*, fecha_inicio*, fecha_fin*, descripcion?, activa? (default true), productos*: [{id_producto*, cantidad* (>=1)}]}` | `201` promoción completa | 201 / 400 Joi o `fecha_fin anterior` o `PORCENTAJE fuera de 0–100` / 404 producto inexistente (ROLLBACK) |
+| POST | `/api/promociones` | Crea con transacción (admin) | `{nombre*, tipo* (PRECIO_FIJO\|PORCENTAJE\|DOS_POR_UNO), valor*, fecha_inicio* (YYYY-MM-DD), fecha_fin* (YYYY-MM-DD), descripcion?, activa? (default true), productos*: [{id_producto*, cantidad* (>=1)}]}` | `201` promoción completa | 201 / 400 Joi o `fecha_fin anterior` o `PORCENTAJE fuera de 0–100` / 404 producto inexistente (ROLLBACK) |
 | PUT | `/api/promociones/:id` | Modifica campos y/o reemplaza productos (admin) | `id` + parcial (al menos un campo); `productos` reemplaza el conjunto | promoción completa | 200 / 400 / 404 |
 | DELETE | `/api/promociones/:id` | Elimina (cascada a `promocion_producto`) | `id` | `{mensaje:"Promoción eliminada"}` | 200 / 404 |
 
@@ -206,17 +216,36 @@ Modelo: `Direccion(id_direccion, calle, altura, piso, departamento, ciudad, prov
 
 ---
 
-## Stock — `/api/stock` (`routes/stockRoutes.js`, `controllers/stockController.js`, `services/stockService.js`)
+## Materias primas — `/api/materias-primas` (`routes/materiaPrimaRoutes.js`, `controllers/materiaPrimaController.js`)
 
-Modelo: `Producto_Sucursal(id_producto, id_sucursal, stock)` — el stock pertenece a la combinación producto + sucursal. Al crear un pedido se descuenta el stock de su sucursal dentro de la misma transacción (falla con 409 y hace rollback si no alcanza; las promos descuentan sus líneas expandidas agregadas por producto).
+Modelo: `MateriaPrima(id_materia_prima, nombre, estado, stock_minimo)` (`models/MateriaPrima.js`, baja lógica con `deleted_at`). Cada producto define su receta vía `Producto_Materia_Prima(id_producto, id_materia_prima, cantidad)`; el stock vive en `Materia_Prima_Sucursal(id_materia_prima, id_sucursal, stock)` (`AGENTS.md §5.5`). `stock_minimo` es global por materia prima (default 0) y se compara contra el stock de cada sucursal para marcar `bajo_stock`.
 
 | Método | Ruta | Descripción | Body / Params | Response | Códigos |
 |--------|------|-------------|---------------|----------|---------|
-| GET | `/api/stock?sucursal=:id` | Productos con stock de una sucursal (0 si no hay fila) | query `sucursal*` | `[{id_producto, nombre, precio, estado, stock}]` | 200 / 404 sucursal inexistente |
-| POST | `/api/stock` | Suma stock (crea la fila si no existe) | `{id_sucursal*, id_producto*, cantidad* (entero >= 1)}` | `{id_sucursal, id_producto, nombre, stock}` | 200 / 400 Joi o cantidad inválida / 404 sucursal o producto inexistente |
+| GET | `/api/materias-primas` | Lista materias primas | — | `[{id_materia_prima, nombre, estado, stock_minimo}]` | 200 |
+| GET | `/api/materias-primas/:id` | Detalle por id | `id` param | materia prima | 200 / 404 |
+| POST | `/api/materias-primas` | Crea materia prima | `{nombre*, estado? (disponible|no_disponible), stock_minimo? (entero >= 0)}` | `201` materia prima | 201 / 400 / 409 nombre duplicado |
+| PUT | `/api/materias-primas/:id` | Actualiza nombre/estado/mínimo | `id` + `{nombre?, estado?, stock_minimo?}` | materia prima | 200 / 400 / 404 / 409 |
+| DELETE | `/api/materias-primas/:id` | Baja lógica | `id` | `{mensaje:"Materia prima dada de baja"}` | 200 / 404 |
+
+---
+
+## Stock — `/api/stock` (`routes/stockRoutes.js`, `controllers/stockController.js`, `services/stockService.js`)
+
+Modelo: `Materia_Prima_Sucursal(id_materia_prima, id_sucursal, stock)` — el stock pertenece a la combinación materia prima + sucursal. El stock de un producto es **derivado** de su receta (`min(floor(stock_materia / cantidad_receta))`); un producto sin receta no puede pedirse. Al crear un pedido se descuentan las materias primas de la receta dentro de la misma transacción (falla con 409 y hace rollback si no alcanza); al cancelar un pedido se reponen.
+
+| Método | Ruta | Descripción | Body / Params | Response | Códigos |
+|--------|------|-------------|---------------|----------|---------|
+| GET | `/api/stock?sucursal=:id` | Materias primas con stock de una sucursal (0 si no hay fila) | query `sucursal*` | `[{id_materia_prima, nombre, estado, stock, stock_minimo, bajo_stock}]` | 200 / 404 sucursal inexistente |
+| POST | `/api/stock` | Suma stock (crea la fila si no existe) | `{id_sucursal*, id_materia_prima*, cantidad* (entero >= 1)}` | `{id_sucursal, id_materia_prima, nombre, stock, stock_minimo, bajo_stock}` | 200 / 400 Joi o cantidad inválida / 404 sucursal o materia prima inexistente |
+
+`bajo_stock` es `true` cuando `stock_minimo > 0 && stock < stock_minimo`.
+
+**Stock derivado del producto:** `GET /api/productos/:id/stock?sucursal=:id` (ver sección Productos).
 
 **Uso frontend:**
 - Empleado: `AdminProductsPage.jsx` (vista de stock de su sucursal) → `GET /api/stock?sucursal=` y `POST /api/stock` para agregar.
+- Admin: `AdminMateriasPrimasPage.jsx` (ABM de materias primas) y sección de receta en el ABM de productos.
 
 ---
 

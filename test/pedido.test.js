@@ -1,6 +1,6 @@
-const request = require("supertest");
-const app = require("../index");
-const { Cliente, Direccion, Sucursal, Producto, Opcional, ProductoSucursal, Pedido } = require("../models");
+const { request, app } = require("./helpers/request");
+const { Cliente, Direccion, Sucursal, Producto, Opcional, MateriaPrima, ProductoMateriaPrima, MateriaPrimaSucursal, Pedido, SucursalHorario } = require("../models");
+const { diaYMinutoLocal } = require("../utils/schedule");
 const { resetDb, closeDb } = require("./db_utils");
 
 // Direcciones de CABA con coordenadas reales (para auto-asignación por cercanía)
@@ -14,6 +14,7 @@ let sucCerca;
 let sucLejos;
 let producto; // precio 5500.00
 let opcional; // precio 500.00
+let materia; // receta: 1 por unidad de producto
 
 beforeAll(async () => {
   await resetDb();
@@ -31,9 +32,13 @@ beforeAll(async () => {
   sucLejos = await Sucursal.create({ ...SUC_LEJOS, estado: "activa" });
   producto = await Producto.create({ nombre: "Hamburguesa Clásica", precio: 5500.00 });
   opcional = await Opcional.create({ nombre: "Extra queso", precio: 500.00, id_producto: producto.id_producto });
-  await ProductoSucursal.bulkCreate([
-    { id_producto: producto.id_producto, id_sucursal: sucCerca.id_sucursal, stock: 50 },
-    { id_producto: producto.id_producto, id_sucursal: sucLejos.id_sucursal, stock: 50 },
+  materia = await MateriaPrima.create({ nombre: "Carne" });
+  await ProductoMateriaPrima.create({
+    id_producto: producto.id_producto, id_materia_prima: materia.id_materia_prima, cantidad: 1,
+  });
+  await MateriaPrimaSucursal.bulkCreate([
+    { id_materia_prima: materia.id_materia_prima, id_sucursal: sucCerca.id_sucursal, stock: 50 },
+    { id_materia_prima: materia.id_materia_prima, id_sucursal: sucLejos.id_sucursal, stock: 50 },
   ]);
 });
 
@@ -71,6 +76,138 @@ describe("POST /api/pedidos (creación)", () => {
     expect(res.body.id_sucursal).toBe(sucCerca.id_sucursal);
   });
 
+  test("rechaza sucursal explícita fuera del radio de cobertura", async () => {
+    const antes = await Pedido.count();
+    const res = await crearPedido({ id_sucursal: sucLejos.id_sucursal });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/radio de cobertura/);
+    expect(await Pedido.count()).toBe(antes);
+  });
+
+  test("no autoasigna una sucursal fuera del radio aunque tenga stock", async () => {
+    const materiaRadio = await MateriaPrima.create({ nombre: "Insumo fuera de radio" });
+    const productoRadio = await Producto.create({ nombre: "Producto fuera de radio", precio: 1000 });
+    await ProductoMateriaPrima.create({
+      id_producto: productoRadio.id_producto,
+      id_materia_prima: materiaRadio.id_materia_prima,
+      cantidad: 1,
+    });
+    await MateriaPrimaSucursal.create({
+      id_materia_prima: materiaRadio.id_materia_prima,
+      id_sucursal: sucLejos.id_sucursal,
+      stock: 10,
+    });
+
+    const antes = await Pedido.count();
+    const res = await crearPedido({
+      detalles: [{ id_producto: productoRadio.id_producto, cantidad: 1 }],
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/radio de cobertura/);
+    expect(await Pedido.count()).toBe(antes);
+  });
+
+  test("autoasigna otra sucursal dentro del radio si la más cercana no tiene stock", async () => {
+    const sucMedia = await Sucursal.create({
+      nombre: "Sucursal a 1 km",
+      calle: "Av. Rivadavia",
+      altura: "2000",
+      ciudad: "CABA",
+      provincia: "Buenos Aires",
+      latitud: -34.6183,
+      longitud: -58.3712,
+      estado: "activa",
+      radio_km: 2,
+    });
+    const materiaRadio = await MateriaPrima.create({ nombre: "Insumo dentro de radio" });
+    const productoRadio = await Producto.create({ nombre: "Producto dentro de radio", precio: 1000 });
+    await ProductoMateriaPrima.create({
+      id_producto: productoRadio.id_producto,
+      id_materia_prima: materiaRadio.id_materia_prima,
+      cantidad: 1,
+    });
+    await MateriaPrimaSucursal.create({
+      id_materia_prima: materiaRadio.id_materia_prima,
+      id_sucursal: sucMedia.id_sucursal,
+      stock: 10,
+    });
+
+    const res = await crearPedido({
+      detalles: [{ id_producto: productoRadio.id_producto, cantidad: 1 }],
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.id_sucursal).toBe(sucMedia.id_sucursal);
+  });
+
+  test("rechaza sucursal explícita si la dirección no tiene coordenadas", async () => {
+    const sinCoords = await Direccion.create({
+      calle: "Sin coordenadas",
+      altura: "1",
+      ciudad: "CABA",
+      provincia: "Buenos Aires",
+      id_cliente: cliente.id_cliente,
+    });
+
+    const res = await crearPedido({
+      id_direccion: sinCoords.id_direccion,
+      id_sucursal: sucCerca.id_sucursal,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/coordenadas/);
+  });
+
+  test("rechaza sucursal explícita sin coordenadas", async () => {
+    const sinCoords = await Sucursal.create({
+      nombre: "Sucursal sin coordenadas",
+      calle: "Sin coordenadas",
+      altura: "1",
+      ciudad: "CABA",
+      provincia: "Buenos Aires",
+      estado: "activa",
+    });
+
+    const res = await crearPedido({ id_sucursal: sinCoords.id_sucursal });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/coordenadas/);
+  });
+
+  test("rechaza sucursal explícita inactiva con 409 y no crea el pedido", async () => {
+    const inactiva = await Sucursal.create({ ...SUC_CERCA, nombre: "Inactiva", estado: "inactiva" });
+    const antes = await Pedido.count();
+
+    const res = await crearPedido({ id_sucursal: inactiva.id_sucursal });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/no está habilitada/);
+    expect(await Pedido.count()).toBe(antes);
+  });
+
+  test("rechaza sucursal explícita fuera de horario con 409", async () => {
+    const cerrada = await Sucursal.create({ ...SUC_LEJOS, nombre: "Cerrada", estado: "activa" });
+    const diaDosDias = ((diaYMinutoLocal().dia + 1) % 7) + 1;
+    await SucursalHorario.create({
+      id_sucursal: cerrada.id_sucursal,
+      dia_semana: diaDosDias,
+      hora_apertura: "10:00",
+      hora_cierre: "12:00",
+    });
+    await MateriaPrimaSucursal.create({
+      id_materia_prima: materia.id_materia_prima,
+      id_sucursal: cerrada.id_sucursal,
+      stock: 50,
+    });
+
+    const res = await crearPedido({ id_sucursal: cerrada.id_sucursal });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/fuera de horario/);
+  });
+
   test("sin stock suficiente en ninguna sucursal devuelve 409 y no crea el pedido", async () => {
     const antes = await Pedido.count();
     const res = await crearPedido({ detalles: [{ id_producto: producto.id_producto, cantidad: 9999 }] });
@@ -80,14 +217,14 @@ describe("POST /api/pedidos (creación)", () => {
   });
 
   test("descuenta el stock de la sucursal asignada", async () => {
-    const stockAntes = (await ProductoSucursal.findOne({
-      where: { id_producto: producto.id_producto, id_sucursal: sucCerca.id_sucursal },
+    const stockAntes = (await MateriaPrimaSucursal.findOne({
+      where: { id_materia_prima: materia.id_materia_prima, id_sucursal: sucCerca.id_sucursal },
     })).stock;
 
     await crearPedido({ id_sucursal: sucCerca.id_sucursal, detalles: [{ id_producto: producto.id_producto, cantidad: 3 }] });
 
-    const stockDespues = (await ProductoSucursal.findOne({
-      where: { id_producto: producto.id_producto, id_sucursal: sucCerca.id_sucursal },
+    const stockDespues = (await MateriaPrimaSucursal.findOne({
+      where: { id_materia_prima: materia.id_materia_prima, id_sucursal: sucCerca.id_sucursal },
     })).stock;
     expect(stockDespues).toBe(stockAntes - 3);
   });
@@ -229,6 +366,18 @@ describe("PUT /api/pedidos/:id (cambio de estado)", () => {
     expect(res.status).toBe(200);
     expect(parseFloat(res.body.importe)).toBe(5500.00);
   });
+
+  test("no permite cambiar la sucursal por PUT", async () => {
+    const creado = await crearPedido({ id_sucursal: sucCerca.id_sucursal });
+
+    const res = await request(app)
+      .put(`/api/pedidos/${creado.body.id_pedido}`)
+      .send({ id_sucursal: sucLejos.id_sucursal });
+
+    expect(res.status).toBe(400);
+    const get = await request(app).get(`/api/pedidos/${creado.body.id_pedido}`);
+    expect(get.body.id_sucursal).toBe(sucCerca.id_sucursal);
+  });
 });
 
 describe("Cancelación", () => {
@@ -240,6 +389,29 @@ describe("Cancelación", () => {
     expect(res.status).toBe(200);
     expect(res.body.estado).toBe("Cancelado");
     expect(res.body.historial.map((h) => h.estado)).toEqual(["Pendiente", "Cancelado"]);
+  });
+
+  test("cancelar un pedido repone el stock de materias primas", async () => {
+    const antes = (await MateriaPrimaSucursal.findOne({
+      where: { id_materia_prima: materia.id_materia_prima, id_sucursal: sucCerca.id_sucursal },
+    })).stock;
+
+    const creado = await crearPedido({
+      id_sucursal: sucCerca.id_sucursal,
+      detalles: [{ id_producto: producto.id_producto, cantidad: 2 }],
+    });
+    const trasPedido = (await MateriaPrimaSucursal.findOne({
+      where: { id_materia_prima: materia.id_materia_prima, id_sucursal: sucCerca.id_sucursal },
+    })).stock;
+    expect(trasPedido).toBe(antes - 2);
+
+    const res = await request(app).put(`/api/pedidos/${creado.body.id_pedido}`).send({ estado: "Cancelado" });
+    expect(res.status).toBe(200);
+
+    const trasCancelar = (await MateriaPrimaSucursal.findOne({
+      where: { id_materia_prima: materia.id_materia_prima, id_sucursal: sucCerca.id_sucursal },
+    })).stock;
+    expect(trasCancelar).toBe(antes);
   });
 
   test("no se puede cancelar un pedido Entregado", async () => {
@@ -263,15 +435,23 @@ describe("Cancelación", () => {
   });
 });
 
-describe("DELETE /api/pedidos/:id", () => {
-  test("elimina y luego el GET da 404", async () => {
+describe("DELETE /api/pedidos/:id (baja lógica)", () => {
+  test("da de baja el pedido: deja de mostrarse pero persiste en la base", async () => {
     const creado = await crearPedido({ id_sucursal: sucCerca.id_sucursal });
+    const id = creado.body.id_pedido;
 
-    const del = await request(app).delete(`/api/pedidos/${creado.body.id_pedido}`);
+    const del = await request(app).delete(`/api/pedidos/${id}`);
     expect(del.status).toBe(200);
 
-    const get = await request(app).get(`/api/pedidos/${creado.body.id_pedido}`);
+    const get = await request(app).get(`/api/pedidos/${id}`);
     expect(get.status).toBe(404);
+
+    const lista = await request(app).get(`/api/pedidos?id_cliente=${cliente.id_cliente}`);
+    expect(lista.body.some((p) => p.id_pedido === id)).toBe(false);
+
+    const enDb = await Pedido.findByPk(id, { paranoid: false });
+    expect(enDb).not.toBeNull();
+    expect(enDb.deletedAt).not.toBeNull();
   });
 
   test("eliminar inexistente devuelve 404", async () => {

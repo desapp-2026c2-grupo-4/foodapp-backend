@@ -25,6 +25,7 @@ const Direccion = sequelize.define("Direccion", {
   },
 }, {
   tableName: "direcciones",
+  paranoid: true,
 });
 
 module.exports = Direccion;

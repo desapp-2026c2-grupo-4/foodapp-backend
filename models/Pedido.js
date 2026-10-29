@@ -51,6 +51,7 @@ const Pedido = sequelize.define("Pedido", {
   tableName: "pedidos",
   updatedAt: false,
   createdAt: "fecha_hora",
+  paranoid: true,
 });
 
 module.exports = Pedido;

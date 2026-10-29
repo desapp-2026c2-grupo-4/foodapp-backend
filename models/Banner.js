@@ -32,6 +32,7 @@ const Banner = sequelize.define("Banner", {
   },
 }, {
   tableName: "banners",
+  paranoid: true,
 });
 
 module.exports = Banner;

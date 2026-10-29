@@ -45,7 +45,7 @@ const deleteBanner = async (req, res, next) => {
     const banner = await Banner.findByPk(req.params.id);
     if (!banner) return res.status(404).json({ error: "Banner no encontrado" });
     await banner.destroy();
-    res.json({ mensaje: "Banner eliminado" });
+    res.json({ mensaje: "Banner dado de baja" });
   } catch (err) { next(err); }
 };
 

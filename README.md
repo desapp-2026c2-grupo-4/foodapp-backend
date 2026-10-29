@@ -70,6 +70,18 @@ npm run db:seed
 > **Nota**  
 > Los seeders son un concepto ligado a Sequelize. Busquen a partir de "Creating the first Seed" en [esta página](https://sequelize.org/master/manual/migrations.html).
 
+### Credenciales de prueba
+
+Después de ejecutar `npm run db:seed`:
+
+| Rol | Email | Contraseña |
+| --- | --- | --- |
+| ADMIN | `admin@altoque.com` | `admin123` |
+| EMPLEADO | `empleado@altoque.com` | `empleado123` |
+| CLIENTE | `juan.perez@example.com` | `cliente123` |
+
+El empleado de prueba queda asignado a la sucursal 1. Los clientes de prueba usan `cliente123`.
+
 ## :file_folder: Estructura de directorios
 
 Breve descripción de qué se puede encontrar en cada uno de los directorios del proyecto:
