@@ -1,6 +1,8 @@
 const { Pedido, DetallePedido, DetallePedidoOpcional, HistorialPedido, Cliente, Sucursal, Direccion, Producto, Opcional, Promocion, sequelize } = require("../models");
 const stockService = require("../services/stockService");
 const pedidoService = require("../services/pedidoService");
+const sucursalService = require("../services/sucursalService");
+const { esAdmin, esEmpleado, esCliente, pedidoPermitido } = require("../utils/authz");
 
 // Flujo de estados en un solo sentido: Pendiente -> Confirmado -> Preparando -> En camino -> Entregado
 // No se permite volver a un estado anterior.
@@ -9,21 +11,40 @@ const FLUJO_ESTADOS = ["Pendiente", "Confirmado", "Preparando", "En camino", "En
 const getPedidos = async (req, res, next) => {
   try {
     const where = {};
-    if (req.query.id_cliente) where.id_cliente = req.query.id_cliente;
-    if (req.query.id_sucursal) where.id_sucursal = req.query.id_sucursal;
+    if (esCliente(req.user)) {
+      if (req.query.id_cliente && Number(req.query.id_cliente) !== Number(req.user.id_cliente)) {
+        return res.status(403).json({ error: "No podés consultar pedidos de otro cliente" });
+      }
+      where.id_cliente = req.user.id_cliente;
+      if (req.query.id_sucursal) where.id_sucursal = req.query.id_sucursal;
+    } else if (esEmpleado(req.user)) {
+      if (!req.user.id_sucursal) {
+        return res.status(403).json({ error: "El usuario no tiene una sucursal asignada" });
+      }
+      if (req.query.id_sucursal && Number(req.query.id_sucursal) !== Number(req.user.id_sucursal)) {
+        return res.status(403).json({ error: "No podés consultar pedidos de otra sucursal" });
+      }
+      where.id_sucursal = req.user.id_sucursal;
+      if (req.query.id_cliente) where.id_cliente = req.query.id_cliente;
+    } else if (esAdmin(req.user)) {
+      if (req.query.id_cliente) where.id_cliente = req.query.id_cliente;
+      if (req.query.id_sucursal) where.id_sucursal = req.query.id_sucursal;
+    } else {
+      return res.status(403).json({ error: "No tenés permisos para consultar pedidos" });
+    }
     const pedidos = await Pedido.findAll({
       where,
       include: [
         { model: Cliente, as: "cliente", attributes: ["id_cliente", "nombre", "apellido", "email"] },
-        { model: Sucursal, as: "sucursal" },
-        { model: Direccion, as: "direccion" },
+        { model: Sucursal, as: "sucursal", paranoid: false },
+        { model: Direccion, as: "direccion", paranoid: false },
         {
           model: DetallePedido,
           as: "detalles",
           include: [
-            { model: Producto, as: "producto" },
-            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
-            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+            { model: Producto, as: "producto", paranoid: false },
+            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional", paranoid: false }] },
+            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"], paranoid: false },
           ],
         },
         { model: HistorialPedido, as: "historial" },
@@ -41,21 +62,24 @@ const getPedidoById = async (req, res, next) => {
     const pedido = await Pedido.findByPk(req.params.id, {
       include: [
         { model: Cliente, as: "cliente", attributes: ["id_cliente", "nombre", "apellido", "email"] },
-        { model: Sucursal, as: "sucursal" },
-        { model: Direccion, as: "direccion" },
+        { model: Sucursal, as: "sucursal", paranoid: false },
+        { model: Direccion, as: "direccion", paranoid: false },
         {
           model: DetallePedido,
           as: "detalles",
           include: [
-            { model: Producto, as: "producto" },
-            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
-            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+            { model: Producto, as: "producto", paranoid: false },
+            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional", paranoid: false }] },
+            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"], paranoid: false },
           ],
         },
         { model: HistorialPedido, as: "historial" },
       ],
     });
     if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (!pedidoPermitido(req.user, pedido)) {
+      return res.status(403).json({ error: "No podés acceder a este pedido" });
+    }
     res.json(pedido);
   } catch (err) {
     next(err);
@@ -63,16 +87,22 @@ const getPedidoById = async (req, res, next) => {
 };
 
 const updatePedido = async (req, res, next) => {
+  const t = await sequelize.transaction();
   try {
-    const pedido = await Pedido.findByPk(req.params.id);
-    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    const pedido = await Pedido.findByPk(req.params.id, { transaction: t });
+    if (!pedido) { await t.rollback(); return res.status(404).json({ error: "Pedido no encontrado" }); }
+    if (!pedidoPermitido(req.user, pedido)) {
+      await t.rollback();
+      return res.status(403).json({ error: "No podés modificar este pedido" });
+    }
 
-    const permitidos = ["estado", "id_sucursal", "importe"];
+    const permitidos = ["estado", "importe"];
     const datos = {};
     for (const key of permitidos) {
       if (req.body[key] !== undefined) datos[key] = req.body[key];
     }
     if (Object.keys(datos).length === 0) {
+      await t.rollback();
       return res.status(400).json({ error: "No se enviaron campos para actualizar" });
     }
 
@@ -81,10 +111,12 @@ const updatePedido = async (req, res, next) => {
     if (datos.estado && datos.estado !== estadoAnterior) {
       // Cancelado es terminal: un pedido cancelado no puede cambiar de estado
       if (estadoAnterior === "Cancelado") {
+        await t.rollback();
         return res.status(400).json({ error: 'No se puede cambiar el estado de un pedido cancelado' });
       }
       // Un pedido entregado no se puede cancelar
       if (datos.estado === "Cancelado" && estadoAnterior === "Entregado") {
+        await t.rollback();
         return res.status(400).json({ error: 'No se puede cancelar un pedido ya entregado' });
       }
       const idxAnterior = FLUJO_ESTADOS.indexOf(estadoAnterior);
@@ -92,41 +124,54 @@ const updatePedido = async (req, res, next) => {
       // Solo se valida cuando ambos estados pertenecen al flujo (Listo queda fuera del flujo lineal;
       // Cancelado se maneja con las reglas de arriba)
       if (idxAnterior !== -1 && idxNuevo !== -1 && idxNuevo !== idxAnterior + 1) {
+        await t.rollback();
         return res.status(400).json({ error: `Transición no permitida: de "${estadoAnterior}" solo se puede avanzar a "${FLUJO_ESTADOS[idxAnterior + 1] || "—"}"` });
       }
     }
-    await pedido.update(datos);
+    await pedido.update(datos, { transaction: t });
 
     if (datos.estado && datos.estado !== estadoAnterior) {
       await HistorialPedido.create({
         id_pedido: pedido.id_pedido,
         estado: datos.estado,
         fecha_hora: new Date(),
+      }, { transaction: t });
+    }
+
+    // Al cancelar un pedido se repone el stock de materias primas consumido
+    if (datos.estado === "Cancelado" && estadoAnterior !== "Cancelado" && pedido.id_sucursal) {
+      const lineas = await DetallePedido.findAll({
+        where: { id_pedido: pedido.id_pedido },
+        attributes: ["id_producto", "cantidad"],
+        transaction: t,
       });
+      await stockService.reponerStock(lineas, pedido.id_sucursal, t);
     }
 
     // Garantizar consistencia de importe = SUM(cantidad*precio) de DetallePedido
     // Si el cliente envió importe manual, se valida contra el cálculo; si difiere se corrige.
-    const importeCalculado = await pedidoService.calcularImporte(pedido.id_pedido);
+    const importeCalculado = await pedidoService.calcularImporte(pedido.id_pedido, t);
     const importeActual = parseFloat(pedido.importe);
     if (importeCalculado !== importeActual) {
       // No se considera error fatal, pero se autocorrige para mantener Pedido.importe consistente
       // según AGENTS.md §5.14 y §5.6 (precio histórico * cantidad)
-      await pedido.update({ importe: importeCalculado });
+      await pedido.update({ importe: importeCalculado }, { transaction: t });
     }
+
+    await t.commit();
 
     const actualizado = await Pedido.findByPk(pedido.id_pedido, {
       include: [
         { model: Cliente, as: "cliente", attributes: ["id_cliente", "nombre", "apellido", "email"] },
-        { model: Sucursal, as: "sucursal" },
-        { model: Direccion, as: "direccion" },
+        { model: Sucursal, as: "sucursal", paranoid: false },
+        { model: Direccion, as: "direccion", paranoid: false },
         {
           model: DetallePedido,
           as: "detalles",
           include: [
-            { model: Producto, as: "producto" },
-            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
-            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+            { model: Producto, as: "producto", paranoid: false },
+            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional", paranoid: false }] },
+            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"], paranoid: false },
           ],
         },
         { model: HistorialPedido, as: "historial" },
@@ -134,6 +179,7 @@ const updatePedido = async (req, res, next) => {
     });
     res.json(actualizado);
   } catch (err) {
+    await t.rollback();
     next(err);
   }
 };
@@ -142,6 +188,14 @@ const createPedido = async (req, res, next) => {
   const t = await sequelize.transaction();
   try {
     const { id_cliente, id_direccion, id_sucursal, detalles, estado } = req.body;
+    if (esCliente(req.user) && Number(id_cliente) !== Number(req.user.id_cliente)) {
+      await t.rollback();
+      return res.status(403).json({ error: "No podés crear pedidos para otro cliente" });
+    }
+    if (esCliente(req.user) && estado && estado !== "Pendiente") {
+      await t.rollback();
+      return res.status(400).json({ error: "El cliente solo puede crear pedidos en estado Pendiente" });
+    }
     if (!id_cliente || !id_direccion || !Array.isArray(detalles) || detalles.length === 0) {
       await t.rollback();
       return res.status(400).json({ error: "id_cliente, id_direccion y detalles (array no vacío) son obligatorios" });
@@ -155,19 +209,12 @@ const createPedido = async (req, res, next) => {
       await t.rollback();
       return res.status(400).json({ error: "La dirección no pertenece al cliente" });
     }
-    let idSucursalFinal = id_sucursal || null;
-    if (idSucursalFinal) {
-      const suc = await Sucursal.findByPk(idSucursalFinal, { transaction: t });
-      if (!suc) { await t.rollback(); return res.status(404).json({ error: "Sucursal no encontrada" }); }
-    } else {
-      // Sin sucursal explícita: asignar la más cercana a la dirección con stock suficiente
-      const sucursalService = require("../services/sucursalService");
-      try {
-        idSucursalFinal = await sucursalService.seleccionarSucursal({ direccion, detalles }, t);
-      } catch (err) {
-        await t.rollback();
-        return res.status(err.status || 500).json({ error: err.message });
-      }
+    let idSucursalFinal;
+    try {
+      idSucursalFinal = await sucursalService.resolverSucursal({ id_sucursal, direccion, detalles }, t);
+    } catch (err) {
+      await t.rollback();
+      return res.status(err.status || 500).json({ error: err.message });
     }
     // Crear pedido con importe 0 temporal
     const pedido = await Pedido.create({
@@ -278,15 +325,15 @@ const createPedido = async (req, res, next) => {
     const creado = await Pedido.findByPk(pedido.id_pedido, {
       include: [
         { model: Cliente, as: "cliente", attributes: ["id_cliente", "nombre", "apellido", "email"] },
-        { model: Sucursal, as: "sucursal" },
-        { model: Direccion, as: "direccion" },
+        { model: Sucursal, as: "sucursal", paranoid: false },
+        { model: Direccion, as: "direccion", paranoid: false },
         {
           model: DetallePedido,
           as: "detalles",
           include: [
-            { model: Producto, as: "producto" },
-            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
-            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+            { model: Producto, as: "producto", paranoid: false },
+            { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional", paranoid: false }] },
+            { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"], paranoid: false },
           ],
         },
         { model: HistorialPedido, as: "historial" },
@@ -303,8 +350,9 @@ const deletePedido = async (req, res, next) => {
   try {
     const pedido = await Pedido.findByPk(req.params.id);
     if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    await pedido.destroy(); // CASCADE borra detalles, historial y producto_pedido
-    res.json({ mensaje: "Pedido eliminado" });
+    // Baja lógica: se conserva el pedido (y sus detalles) para estadísticas
+    await pedido.destroy();
+    res.json({ mensaje: "Pedido dado de baja" });
   } catch (err) {
     next(err);
   }
@@ -315,12 +363,15 @@ const getDetallesByPedidoId = async (req, res, next) => {
   try {
     const pedido = await Pedido.findByPk(req.params.id);
     if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (!pedidoPermitido(req.user, pedido)) {
+      return res.status(403).json({ error: "No podés acceder a este pedido" });
+    }
     const detalles = await DetallePedido.findAll({
       where: { id_pedido: req.params.id },
       include: [
-        { model: Producto, as: "producto" },
-        { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional" }] },
-        { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"] },
+        { model: Producto, as: "producto", paranoid: false },
+        { model: DetallePedidoOpcional, as: "opciones", include: [{ model: Opcional, as: "opcional", paranoid: false }] },
+        { model: Promocion, as: "promocion", attributes: ["id_promocion", "nombre", "tipo", "valor"], paranoid: false },
       ],
       order: [["id_detalle", "ASC"]],
     });
@@ -338,6 +389,9 @@ const updateDetallePreparado = async (req, res, next) => {
   try {
     const pedido = await Pedido.findByPk(req.params.id);
     if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (!pedidoPermitido(req.user, pedido)) {
+      return res.status(403).json({ error: "No podés modificar este pedido" });
+    }
     if (pedido.estado !== "Preparando") {
       return res.status(400).json({ error: "Solo se pueden confirmar items de un pedido en preparación" });
     }

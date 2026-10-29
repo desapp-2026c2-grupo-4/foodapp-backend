@@ -2,10 +2,13 @@ const sequelize = require("../config/database");
 const Cliente = require("./Cliente");
 const Direccion = require("./Direccion");
 const Sucursal = require("./Sucursal");
+const SucursalHorario = require("./SucursalHorario");
 const Categoria = require("./Categoria");
 const Producto = require("./Producto");
 const CategoriaProducto = require("./CategoriaProducto");
-const ProductoSucursal = require("./ProductoSucursal");
+const MateriaPrima = require("./MateriaPrima");
+const MateriaPrimaSucursal = require("./MateriaPrimaSucursal");
+const ProductoMateriaPrima = require("./ProductoMateriaPrima");
 const Pedido = require("./Pedido");
 const DetallePedido = require("./DetallePedido");
 const HistorialPedido = require("./HistorialPedido");
@@ -33,6 +36,10 @@ Pedido.belongsTo(Direccion, { foreignKey: "id_direccion", as: "direccion" });
 Sucursal.hasMany(Pedido, { foreignKey: "id_sucursal", as: "pedidos" });
 Pedido.belongsTo(Sucursal, { foreignKey: "id_sucursal", as: "sucursal" });
 
+// Sucursal 1:N SucursalHorario (apertura/cierre por día)
+Sucursal.hasMany(SucursalHorario, { foreignKey: "id_sucursal", as: "horarios" });
+SucursalHorario.belongsTo(Sucursal, { foreignKey: "id_sucursal", as: "sucursal" });
+
 // Producto N:M Categoria via CategoriaProducto
 Producto.belongsToMany(Categoria, {
   through: CategoriaProducto,
@@ -47,18 +54,32 @@ Categoria.belongsToMany(Producto, {
   as: "productos",
 });
 
-// Producto N:M Sucursal via ProductoSucursal (stock)
-Producto.belongsToMany(Sucursal, {
-  through: ProductoSucursal,
+// Producto N:M MateriaPrima via ProductoMateriaPrima (receta/BOM: cantidad por unidad)
+Producto.belongsToMany(MateriaPrima, {
+  through: ProductoMateriaPrima,
   foreignKey: "id_producto",
+  otherKey: "id_materia_prima",
+  as: "materiasPrimas",
+});
+MateriaPrima.belongsToMany(Producto, {
+  through: ProductoMateriaPrima,
+  foreignKey: "id_materia_prima",
+  otherKey: "id_producto",
+  as: "productos",
+});
+
+// MateriaPrima N:M Sucursal via MateriaPrimaSucursal (stock por sucursal)
+MateriaPrima.belongsToMany(Sucursal, {
+  through: MateriaPrimaSucursal,
+  foreignKey: "id_materia_prima",
   otherKey: "id_sucursal",
   as: "sucursales",
 });
-Sucursal.belongsToMany(Producto, {
-  through: ProductoSucursal,
+Sucursal.belongsToMany(MateriaPrima, {
+  through: MateriaPrimaSucursal,
   foreignKey: "id_sucursal",
-  otherKey: "id_producto",
-  as: "productos",
+  otherKey: "id_materia_prima",
+  as: "materiasPrimas",
 });
 
 // Pedido 1:N DetallePedido
@@ -127,10 +148,13 @@ module.exports = {
   Cliente,
   Direccion,
   Sucursal,
+  SucursalHorario,
   Categoria,
   Producto,
   CategoriaProducto,
-  ProductoSucursal,
+  MateriaPrima,
+  MateriaPrimaSucursal,
+  ProductoMateriaPrima,
   Pedido,
   DetallePedido,
   HistorialPedido,

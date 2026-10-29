@@ -49,11 +49,8 @@ const deleteOpcional = async (req, res, next) => {
     const opcional = await Opcional.findByPk(req.params.opcionalId || req.params.id);
     if (!opcional) return res.status(404).json({ error: "Opcional no encontrado" });
     await opcional.destroy();
-    res.json({ mensaje: "Opcional eliminado" });
+    res.json({ mensaje: "Opcional dado de baja" });
   } catch (err) {
-    if (err.name === "SequelizeForeignKeyConstraintError") {
-      return res.status(409).json({ error: "No se puede eliminar opcional con pedidos asociados" });
-    }
     next(err);
   }
 };

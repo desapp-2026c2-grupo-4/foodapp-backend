@@ -1,5 +1,4 @@
-const request = require("supertest");
-const app = require("../index");
+const { request, app } = require("./helpers/request");
 const { Cliente } = require("../models");
 const { resetDb, closeDb } = require("./db_utils");
 

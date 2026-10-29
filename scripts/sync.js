@@ -7,7 +7,7 @@ const force = process.argv.includes("--force");
   try {
     await sequelize.authenticate();
     console.log("Conexión OK, sincronizando modelos...");
-    await sequelize.sync({ force });
+    await sequelize.sync(force ? { force: true } : { alter: true });
     console.log(`Sincronización ${force ? "force (drop + create)" : "alter"} completada`);
     process.exit(0);
   } catch (err) {

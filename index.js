@@ -18,6 +18,7 @@ const reporteRoutes = require("./routes/reporteRoutes");
 const authRoutes = require("./routes/authRoutes");
 const empleadoRoutes = require("./routes/empleadoRoutes");
 const stockRoutes = require("./routes/stockRoutes");
+const materiaPrimaRoutes = require("./routes/materiaPrimaRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -62,6 +63,7 @@ app.use("/api/reportes", reporteRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/empleados", empleadoRoutes);
 app.use("/api/stock", stockRoutes);
+app.use("/api/materias-primas", materiaPrimaRoutes);
 
 app.use(errorMiddleware);
 
