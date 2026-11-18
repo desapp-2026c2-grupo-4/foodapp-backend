@@ -11,7 +11,7 @@ router.get("/", autenticar, controller.getPedidos);
 router.get("/:id/detalles", autenticar, controller.getDetallesByPedidoId);
 router.put("/:id/detalles/:idDetalle", autenticar, requireStaff, validate(updateDetallePreparadoSchema), controller.updateDetallePreparado);
 router.get("/:id", autenticar, controller.getPedidoById);
-router.put("/:id", autenticar, requireStaff, validate(updatePedidoSchema), controller.updatePedido);
+router.put("/:id", autenticar, validate(updatePedidoSchema), controller.updatePedido);
 router.delete("/:id", autenticar, requireAdmin, controller.deletePedido);
 
 module.exports = router;

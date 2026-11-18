@@ -11,6 +11,8 @@ beforeAll(async () => {
   const reg = await request(app).post("/api/auth/register").send({
     nombre: "Juan",
     apellido: "Pérez",
+    tipo_doc: "DNI",
+    dni: "30111222",
     email: EMAIL,
     password: PASSWORD,
   });

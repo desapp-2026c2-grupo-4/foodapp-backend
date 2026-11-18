@@ -1,6 +1,7 @@
 const { request, app } = require("./helpers/request");
 const { Cliente } = require("../models");
 const { resetDb, closeDb } = require("./db_utils");
+const { hashPassword } = require("../utils/password");
 
 const CLIENTE = {
   nombre: "Juan",
@@ -11,8 +12,21 @@ const CLIENTE = {
   password: "secreto123",
 };
 
+const RECUPERACION = {
+  nombre: "Recupera",
+  apellido: "Clave",
+  tipo_doc: "DNI",
+  dni: "33444555",
+  email: "recupera@example.com",
+  password: "vieja123",
+};
+
 beforeAll(async () => {
   await resetDb();
+  await Cliente.create({
+    ...RECUPERACION,
+    password: await hashPassword(RECUPERACION.password),
+  });
 });
 
 afterAll(async () => {
@@ -67,6 +81,14 @@ describe("POST /api/auth/register", () => {
 
     expect(sinEmail.status).toBe(400);
     expect(corta.status).toBe(400);
+  });
+
+  test("rechaza el registro sin DNI", async () => {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({ ...CLIENTE, email: "sin.dni@example.com", dni: undefined });
+
+    expect(res.status).toBe(400);
   });
 });
 
@@ -138,5 +160,86 @@ describe("POST /api/auth/login", () => {
 
     const guardado = await Cliente.findOne({ where: { email: "viejo.plano@example.com" } });
     expect(guardado.password).toMatch(/^\$2[aby]\$/);
+  });
+});
+
+describe("Recuperación de contraseña", () => {
+  const recuperar = (email, dni) =>
+    request(app).post("/api/auth/password/recuperar").send({ email, dni });
+
+  test("verifica email + DNI y devuelve un token temporal", async () => {
+    const res = await recuperar(RECUPERACION.email, "33.444.555");
+
+    expect(res.status).toBe(200);
+    expect(res.body.resetToken).toBeDefined();
+    expect(res.body.expiresIn).toBe(900);
+
+    const guardado = await Cliente.findOne({ where: { email: RECUPERACION.email } });
+    expect(guardado.password).toMatch(/^\$2[aby]\$/);
+  });
+
+  test("no revela si el email existe cuando el DNI no coincide", async () => {
+    const dniIncorrecto = await recuperar(RECUPERACION.email, "00000000");
+    const emailInexistente = await recuperar("nadie@example.com", RECUPERACION.dni);
+
+    expect(dniIncorrecto.status).toBe(400);
+    expect(emailInexistente.status).toBe(400);
+    expect(dniIncorrecto.body.resetToken).toBeUndefined();
+    expect(emailInexistente.body.resetToken).toBeUndefined();
+    expect(dniIncorrecto.body.error).toBe("No se pudieron verificar los datos");
+    expect(emailInexistente.body.error).toBe(dniIncorrecto.body.error);
+  });
+
+  test("restablece la contraseña con el token y permite login con la nueva", async () => {
+    const recuperacion = await recuperar(RECUPERACION.email, RECUPERACION.dni);
+    const res = await request(app)
+      .post("/api/auth/password/restablecer")
+      .send({ resetToken: recuperacion.body.resetToken, passwordNueva: "nueva789" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.mensaje).toBe("Contraseña actualizada correctamente");
+
+    const guardado = await Cliente.findOne({ where: { email: RECUPERACION.email } });
+    expect(guardado.password).not.toBe("nueva789");
+    expect(guardado.password).toMatch(/^\$2[aby]\$/);
+
+    const loginNuevo = await request(app)
+      .post("/api/auth/login")
+      .send({ email: RECUPERACION.email, password: "nueva789" });
+    expect(loginNuevo.status).toBe(200);
+
+    const loginViejo = await request(app)
+      .post("/api/auth/login")
+      .send({ email: RECUPERACION.email, password: RECUPERACION.password });
+    expect(loginViejo.status).toBe(401);
+  });
+
+  test("rechaza un token inválido con 400", async () => {
+    const res = await request(app)
+      .post("/api/auth/password/restablecer")
+      .send({ resetToken: "token-invalido", passwordNueva: "nueva789" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/inválido|expiró/);
+  });
+
+  test("rechaza una contraseña nueva corta con 400", async () => {
+    const recuperacion = await recuperar(RECUPERACION.email, RECUPERACION.dni);
+    const res = await request(app)
+      .post("/api/auth/password/restablecer")
+      .send({ resetToken: recuperacion.body.resetToken, passwordNueva: "123" });
+
+    expect(res.status).toBe(400);
+  });
+
+  test("un token de sesión normal no sirve para restablecer contraseña", async () => {
+    const login = await request(app)
+      .post("/api/auth/login")
+      .send({ email: CLIENTE.email, password: CLIENTE.password });
+    const res = await request(app)
+      .post("/api/auth/password/restablecer")
+      .send({ resetToken: login.body.token, passwordNueva: "nueva789" });
+
+    expect(res.status).toBe(400);
   });
 });

@@ -1,6 +1,6 @@
 const { Cliente, Empleado, Direccion, Sucursal } = require("../models");
 const { hashPassword, verificarPassword, esHashBcrypt } = require("../utils/password");
-const { firmarToken } = require("../utils/jwt");
+const { firmarToken, firmarTokenRecuperacion, verificarTokenRecuperacion } = require("../utils/jwt");
 
 const error = (status, message) => {
   const err = new Error(message);
@@ -61,6 +61,29 @@ const register = async ({ nombre, apellido, tipo_doc, dni, email, password }) =>
   return { token, user };
 };
 
+const normalizarDni = (dni) => String(dni ?? "").replace(/\D/g, "");
+
+const recuperarPassword = async ({ email, dni }) => {
+  const cliente = await Cliente.findOne({ where: { email } });
+  const dniIngresado = normalizarDni(dni);
+  const dniGuardado = normalizarDni(cliente?.dni);
+  if (!cliente || !dniGuardado || !dniIngresado || dniGuardado !== dniIngresado) {
+    throw error(400, "No se pudieron verificar los datos");
+  }
+  return {
+    resetToken: firmarTokenRecuperacion({ id_cliente: cliente.id_cliente }),
+    expiresIn: 900,
+  };
+};
+
+const restablecerPassword = async ({ resetToken, passwordNueva }) => {
+  const payload = verificarTokenRecuperacion(resetToken);
+  const cliente = await Cliente.findByPk(payload.id_cliente);
+  if (!cliente) throw error(400, "El token de recuperación es inválido o expiró");
+  await cliente.update({ password: await hashPassword(passwordNueva) });
+  return { mensaje: "Contraseña actualizada correctamente" };
+};
+
 const login = async ({ email, password }) => {
   const cliente = await Cliente.findOne({
     where: { email },
@@ -87,4 +110,4 @@ const login = async ({ email, password }) => {
   throw error(401, "Credenciales inválidas");
 };
 
-module.exports = { register, login };
+module.exports = { register, login, recuperarPassword, restablecerPassword };

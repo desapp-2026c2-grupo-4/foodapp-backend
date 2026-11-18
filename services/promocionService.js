@@ -1,5 +1,6 @@
 const { sequelize, Promocion, PromocionProducto, Producto } = require("../models");
 const { TIMEZONE, fechaLocalISO, normalizarFechaISO } = require("../utils/dates");
+const sincronizarRelacion = require("../utils/sincronizarRelacion");
 
 const TIPOS = ["PRECIO_FIJO", "PORCENTAJE", "DOS_POR_UNO"];
 
@@ -132,13 +133,18 @@ async function modificarPromocion(id_promocion, { nombre, descripcion, imagen, t
     if (productos !== undefined) await validarProductos(productos, t);
     if (Object.keys(datos).length > 0) await promocion.update(datos, { transaction: t });
     if (productos !== undefined) {
-      await PromocionProducto.destroy({ where: { id_promocion }, transaction: t });
-      for (const item of productos) {
-        await PromocionProducto.create(
-          { id_promocion, id_producto: item.id_producto, cantidad: item.cantidad },
-          { transaction: t }
-        );
-      }
+      await sincronizarRelacion({
+        modelo: PromocionProducto,
+        where: { id_promocion },
+        items: productos,
+        clave: (item) => item.id_producto,
+        crear: (item) => ({
+          id_producto: item.id_producto,
+          cantidad: item.cantidad,
+        }),
+        actualizar: (item) => ({ cantidad: item.cantidad }),
+        transaction: t,
+      });
     }
     await t.commit();
     return fetchCompleta(id_promocion);

@@ -30,7 +30,10 @@ const PromocionProducto = sequelize.define("PromocionProducto", {
   },
 }, {
   tableName: "promocion_producto",
-  timestamps: false,
+  timestamps: true,
+  createdAt: false,
+  updatedAt: false,
+  paranoid: true,
   indexes: [
     { unique: true, fields: ["id_promocion", "id_producto"] },
   ],

@@ -92,6 +92,8 @@ describe("El historial conserva las referencias dadas de baja", () => {
     const reg = await request(app).post("/api/auth/register").send({
       nombre: "Ana",
       apellido: "Gómez",
+      tipo_doc: "DNI",
+      dni: "30111222",
       email: "ana@example.com",
       password: "secreto123",
     });

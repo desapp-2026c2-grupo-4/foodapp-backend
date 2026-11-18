@@ -19,6 +19,8 @@ const DetallePedidoOpcional = require("./DetallePedidoOpcional");
 const Banner = require("./Banner");
 const Promocion = require("./Promocion");
 const PromocionProducto = require("./PromocionProducto");
+const ReduccionStock = require("./ReduccionStock");
+const Parametro = require("./Parametro");
 
 // Cliente 1:N Direccion
 Cliente.hasMany(Direccion, { foreignKey: "id_cliente", as: "direcciones" });
@@ -81,6 +83,14 @@ Sucursal.belongsToMany(MateriaPrima, {
   otherKey: "id_materia_prima",
   as: "materiasPrimas",
 });
+
+// Reducciones manuales de stock con motivo (auditoría)
+MateriaPrima.hasMany(ReduccionStock, { foreignKey: "id_materia_prima", as: "reduccionesStock" });
+ReduccionStock.belongsTo(MateriaPrima, { foreignKey: "id_materia_prima", as: "materiaPrima" });
+Sucursal.hasMany(ReduccionStock, { foreignKey: "id_sucursal", as: "reduccionesStock" });
+ReduccionStock.belongsTo(Sucursal, { foreignKey: "id_sucursal", as: "sucursal" });
+Empleado.hasMany(ReduccionStock, { foreignKey: "id_empleado", as: "reduccionesStock" });
+ReduccionStock.belongsTo(Empleado, { foreignKey: "id_empleado", as: "empleado" });
 
 // Pedido 1:N DetallePedido
 Pedido.hasMany(DetallePedido, { foreignKey: "id_pedido", as: "detalles" });
@@ -165,4 +175,6 @@ module.exports = {
   Banner,
   Promocion,
   PromocionProducto,
+  ReduccionStock,
+  Parametro,
 };

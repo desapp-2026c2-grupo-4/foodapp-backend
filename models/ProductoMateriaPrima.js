@@ -27,7 +27,10 @@ const ProductoMateriaPrima = sequelize.define("ProductoMateriaPrima", {
   },
 }, {
   tableName: "producto_materia_prima",
-  timestamps: false,
+  timestamps: true,
+  createdAt: false,
+  updatedAt: false,
+  paranoid: true,
 });
 
 module.exports = ProductoMateriaPrima;

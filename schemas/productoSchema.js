@@ -1,6 +1,6 @@
 const Joi = require("joi");
 
-const ESTADOS = ["disponible", "no_disponible", "pausado"];
+const ESTADOS = ["disponible", "no_disponible"];
 
 const materiaPrimaItem = Joi.object({
   id_materia_prima: Joi.number().integer().positive().required(),
@@ -13,8 +13,8 @@ const createProductoSchema = Joi.object({
   precio: Joi.number().min(0).required(),
   imagen: Joi.string().trim().allow("", null).max(500),
   estado: Joi.string().valid(...ESTADOS),
-  categorias: Joi.array().items(Joi.number().integer().positive()),
-  materiasPrimas: Joi.array().items(materiaPrimaItem),
+  categorias: Joi.array().items(Joi.number().integer().positive()).unique(),
+  materiasPrimas: Joi.array().items(materiaPrimaItem).unique("id_materia_prima"),
 });
 
 const updateProductoSchema = Joi.object({
@@ -23,8 +23,8 @@ const updateProductoSchema = Joi.object({
   precio: Joi.number().min(0),
   imagen: Joi.string().trim().allow("", null).max(500),
   estado: Joi.string().valid(...ESTADOS),
-  categorias: Joi.array().items(Joi.number().integer().positive()),
-  materiasPrimas: Joi.array().items(materiaPrimaItem),
+  categorias: Joi.array().items(Joi.number().integer().positive()).unique(),
+  materiasPrimas: Joi.array().items(materiaPrimaItem).unique("id_materia_prima"),
 }).min(1);
 
 module.exports = { createProductoSchema, updateProductoSchema };

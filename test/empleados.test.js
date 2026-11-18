@@ -1,5 +1,6 @@
 const { request, requestAs, app } = require("./helpers/request");
 const { crearCliente, crearEmpleado, emailUnico } = require("./helpers/users");
+const { getAdmin, getAdminCredentials } = require("./helpers/auth");
 const { resetDb, closeDb } = require("./db_utils");
 const { Sucursal, Empleado } = require("../models");
 
@@ -142,6 +143,18 @@ describe("CRUD /api/empleados", () => {
     });
     expect(login.status).toBe(401);
     expect(await Empleado.findByPk(creado.body.id_empleado)).toBeNull();
+  });
+
+  test("no permite que un admin se dé de baja a sí mismo", async () => {
+    const admin = getAdmin();
+    const res = await request(app).delete(`/api/empleados/${admin.id_empleado}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/propia cuenta/i);
+    expect(await Empleado.findByPk(admin.id_empleado)).not.toBeNull();
+
+    const login = await requestAs(null).post("/api/auth/login").send(getAdminCredentials());
+    expect(login.status).toBe(200);
   });
 
   test("permite reutilizar el email después de la baja", async () => {

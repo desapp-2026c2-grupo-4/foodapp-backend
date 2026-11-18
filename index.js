@@ -19,6 +19,7 @@ const authRoutes = require("./routes/authRoutes");
 const empleadoRoutes = require("./routes/empleadoRoutes");
 const stockRoutes = require("./routes/stockRoutes");
 const materiaPrimaRoutes = require("./routes/materiaPrimaRoutes");
+const parametroRoutes = require("./routes/parametroRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -64,6 +65,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/empleados", empleadoRoutes);
 app.use("/api/stock", stockRoutes);
 app.use("/api/materias-primas", materiaPrimaRoutes);
+app.use("/api/parametros", parametroRoutes);
 
 app.use(errorMiddleware);
 

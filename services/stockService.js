@@ -1,4 +1,14 @@
-const { Producto, Sucursal, MateriaPrima, MateriaPrimaSucursal, ProductoMateriaPrima } = require("../models");
+const parametroService = require("./parametroService");
+const {
+  sequelize,
+  Producto,
+  Sucursal,
+  MateriaPrima,
+  MateriaPrimaSucursal,
+  ProductoMateriaPrima,
+  ReduccionStock,
+  Empleado,
+} = require("../models");
 
 function errorConStatus(status, message) {
   const err = new Error(message);
@@ -108,6 +118,111 @@ async function agregarStock({ id_sucursal, id_materia_prima, cantidad }, transac
 }
 
 /**
+ * Reduce manualmente el stock de una materia prima en una sucursal.
+ * Registra el motivo, el usuario y los snapshots de stock en la misma transacción.
+ */
+async function reducirStock({ id_sucursal, id_materia_prima, cantidad, motivo, id_empleado }) {
+  if (!Number.isInteger(cantidad) || cantidad < 1) {
+    throw errorConStatus(400, "La cantidad a reducir debe ser un entero >= 1");
+  }
+  const motivoLimpio = String(motivo || "").trim();
+  if (motivoLimpio.length < 3) {
+    throw errorConStatus(400, "El motivo debe tener al menos 3 caracteres");
+  }
+
+  return sequelize.transaction(async (transaction) => {
+    const { materia } = await validarSucursalYMateriaPrima(id_sucursal, id_materia_prima, transaction);
+    const fila = await MateriaPrimaSucursal.findOne({
+      where: { id_sucursal, id_materia_prima },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const stockAnterior = fila ? fila.stock : 0;
+    if (!fila || stockAnterior <= 0) {
+      throw errorConStatus(409, `No hay stock registrado de ${materia.nombre} en la sucursal`);
+    }
+    if (cantidad > stockAnterior) {
+      throw errorConStatus(409, `Stock insuficiente de ${materia.nombre} en la sucursal (disponible: ${stockAnterior}, solicitado: ${cantidad})`);
+    }
+
+    const stockNuevo = stockAnterior - cantidad;
+    await fila.update({ stock: stockNuevo }, { transaction });
+    const reduccion = await ReduccionStock.create({
+      id_sucursal,
+      id_materia_prima,
+      id_empleado,
+      cantidad,
+      stock_anterior: stockAnterior,
+      stock_nuevo: stockNuevo,
+      motivo: motivoLimpio,
+    }, { transaction });
+
+    return {
+      id_reduccion_stock: reduccion.id_reduccion_stock,
+      id_sucursal,
+      id_materia_prima,
+      nombre: materia.nombre,
+      cantidad,
+      stock_anterior: stockAnterior,
+      stock_nuevo: stockNuevo,
+      stock: stockNuevo,
+      stock_minimo: materia.stock_minimo,
+      bajo_stock: materia.stock_minimo > 0 && stockNuevo < materia.stock_minimo,
+      motivo: motivoLimpio,
+      fecha_hora: reduccion.fecha_hora,
+      id_empleado,
+    };
+  });
+}
+
+/**
+ * Lista las últimas reducciones manuales de stock de una sucursal.
+ */
+async function listarReduccionesStock(id_sucursal) {
+  const sucursal = await Sucursal.findByPk(id_sucursal);
+  if (!sucursal) throw errorConStatus(404, "Sucursal no encontrada");
+  const limite = await parametroService.obtenerNumero("historial_reducciones_limit", 20);
+
+  const filas = await ReduccionStock.findAll({
+    where: { id_sucursal },
+    include: [
+      {
+        model: MateriaPrima,
+        as: "materiaPrima",
+        attributes: ["id_materia_prima", "nombre"],
+        paranoid: false,
+      },
+      {
+        model: Empleado,
+        as: "empleado",
+        attributes: ["id_empleado", "nombre", "apellido"],
+        paranoid: false,
+      },
+    ],
+    order: [["fecha_hora", "DESC"], ["id_reduccion_stock", "DESC"]],
+    limit: limite,
+  });
+
+  return filas.map((f) => ({
+    id_reduccion_stock: f.id_reduccion_stock,
+    id_sucursal: f.id_sucursal,
+    id_materia_prima: f.id_materia_prima,
+    materia_prima: f.materiaPrima
+      ? { id_materia_prima: f.materiaPrima.id_materia_prima, nombre: f.materiaPrima.nombre }
+      : null,
+    id_empleado: f.id_empleado,
+    empleado: f.empleado
+      ? { id_empleado: f.empleado.id_empleado, nombre: f.empleado.nombre, apellido: f.empleado.apellido }
+      : null,
+    cantidad: f.cantidad,
+    stock_anterior: f.stock_anterior,
+    stock_nuevo: f.stock_nuevo,
+    motivo: f.motivo,
+    fecha_hora: f.fecha_hora,
+  }));
+}
+
+/**
  * Descuenta las materias primas necesarias para las líneas de un pedido en una
  * sucursal. Agrupa por producto, expande a materias primas según la receta,
  * bloquea las filas y falla con 409 si no hay stock suficiente (rollback).
@@ -212,6 +327,8 @@ async function calcularStockProducto(id_producto, id_sucursal, transaction) {
 module.exports = {
   listarStockSucursal,
   agregarStock,
+  reducirStock,
+  listarReduccionesStock,
   descontarStock,
   reponerStock,
   necesidadesMateriasDesdeProductos,
