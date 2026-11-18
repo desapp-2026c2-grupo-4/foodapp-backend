@@ -1,4 +1,5 @@
 const { request, app } = require("./helpers/request");
+const { getAdmin } = require("./helpers/auth");
 const {
   Cliente,
   Direccion,
@@ -7,6 +8,7 @@ const {
   MateriaPrima,
   ProductoMateriaPrima,
   MateriaPrimaSucursal,
+  ReduccionStock,
 } = require("../models");
 const { resetDb, closeDb } = require("./db_utils");
 
@@ -28,6 +30,8 @@ beforeAll(async () => {
   const reg = await request(app).post("/api/auth/register").send({
     nombre: "Juan",
     apellido: "Pérez",
+    tipo_doc: "DNI",
+    dni: "30111222",
     email: "juan.perez@example.com",
     password: "secreto123",
   });
@@ -217,6 +221,126 @@ describe("POST /api/stock (agregar)", () => {
     });
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/stock/reducciones", () => {
+  test("reduce stock y registra motivo, usuario y snapshots", async () => {
+    const antes = await stockDe(pan.id_materia_prima, sucursal.id_sucursal);
+    const res = await request(app).post("/api/stock/reducciones").send({
+      id_sucursal: sucursal.id_sucursal,
+      id_materia_prima: pan.id_materia_prima,
+      cantidad: 4,
+      motivo: "Producto vencido",
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      id_materia_prima: pan.id_materia_prima,
+      nombre: "Pan",
+      cantidad: 4,
+      stock_anterior: antes,
+      stock_nuevo: antes - 4,
+      stock: antes - 4,
+      motivo: "Producto vencido",
+    });
+    expect(await stockDe(pan.id_materia_prima, sucursal.id_sucursal)).toBe(antes - 4);
+
+    const registro = await ReduccionStock.findByPk(res.body.id_reduccion_stock);
+    expect(registro).toMatchObject({
+      id_sucursal: sucursal.id_sucursal,
+      id_materia_prima: pan.id_materia_prima,
+      id_empleado: getAdmin().id_empleado,
+      cantidad: 4,
+      stock_anterior: antes,
+      stock_nuevo: antes - 4,
+      motivo: "Producto vencido",
+    });
+  });
+
+  test("rechaza una cantidad mayor al stock sin modificarlo", async () => {
+    const antes = await stockDe(pan.id_materia_prima, sucursal.id_sucursal);
+    const res = await request(app).post("/api/stock/reducciones").send({
+      id_sucursal: sucursal.id_sucursal,
+      id_materia_prima: pan.id_materia_prima,
+      cantidad: antes + 1,
+      motivo: "Ajuste",
+    });
+
+    expect(res.status).toBe(409);
+    expect(await stockDe(pan.id_materia_prima, sucursal.id_sucursal)).toBe(antes);
+  });
+
+  test("rechaza motivo vacío, cantidad inválida y campos faltantes", async () => {
+    const sinMotivo = await request(app).post("/api/stock/reducciones").send({
+      id_sucursal: sucursal.id_sucursal,
+      id_materia_prima: pan.id_materia_prima,
+      cantidad: 1,
+      motivo: "  ",
+    });
+    const cantidadCero = await request(app).post("/api/stock/reducciones").send({
+      id_sucursal: sucursal.id_sucursal,
+      id_materia_prima: pan.id_materia_prima,
+      cantidad: 0,
+      motivo: "Ajuste",
+    });
+    const sinCampos = await request(app).post("/api/stock/reducciones").send({});
+
+    expect(sinMotivo.status).toBe(400);
+    expect(cantidadCero.status).toBe(400);
+    expect(sinCampos.status).toBe(400);
+  });
+
+  test("devuelve 404 para sucursal o materia prima inexistente", async () => {
+    const sucursalInexistente = await request(app).post("/api/stock/reducciones").send({
+      id_sucursal: 9999,
+      id_materia_prima: pan.id_materia_prima,
+      cantidad: 1,
+      motivo: "Ajuste",
+    });
+    const materiaInexistente = await request(app).post("/api/stock/reducciones").send({
+      id_sucursal: sucursal.id_sucursal,
+      id_materia_prima: 9999,
+      cantidad: 1,
+      motivo: "Ajuste",
+    });
+
+    expect(sucursalInexistente.status).toBe(404);
+    expect(materiaInexistente.status).toBe(404);
+  });
+
+  test("reducir exactamente el stock disponible lo deja en 0", async () => {
+    const antes = await stockDe(gaseosa.id_materia_prima, sucursal.id_sucursal);
+    const res = await request(app).post("/api/stock/reducciones").send({
+      id_sucursal: sucursal.id_sucursal,
+      id_materia_prima: gaseosa.id_materia_prima,
+      cantidad: antes,
+      motivo: "Rotura",
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.stock_nuevo).toBe(0);
+    expect(await stockDe(gaseosa.id_materia_prima, sucursal.id_sucursal)).toBe(0);
+  });
+
+  test("GET /api/stock/reducciones devuelve el historial de la sucursal", async () => {
+    const res = await request(app).get(`/api/stock/reducciones?sucursal=${sucursal.id_sucursal}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThanOrEqual(2);
+    const primera = res.body[0];
+    expect(primera).toHaveProperty("id_reduccion_stock");
+    expect(primera).toHaveProperty("cantidad");
+    expect(primera).toHaveProperty("stock_anterior");
+    expect(primera).toHaveProperty("stock_nuevo");
+    expect(primera).toHaveProperty("motivo");
+    expect(primera.materia_prima).toHaveProperty("nombre");
+    expect(primera.empleado).toHaveProperty("nombre");
+  });
+
+  test("GET /api/stock/reducciones exige la query sucursal", async () => {
+    const res = await request(app).get("/api/stock/reducciones");
+    expect(res.status).toBe(400);
   });
 });
 

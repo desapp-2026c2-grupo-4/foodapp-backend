@@ -83,14 +83,26 @@ describe("CRUD /api/productos", () => {
       nombre: "Producto actualizado",
       descripcion: "Nueva descripción",
       precio: 2500,
-      estado: "pausado",
+      estado: "no_disponible",
     });
 
     expect(res.status).toBe(200);
     expect(res.body.nombre).toBe("Producto actualizado");
     expect(res.body.descripcion).toBe("Nueva descripción");
     expect(Number(res.body.precio)).toBe(2500);
-    expect(res.body.estado).toBe("pausado");
+    expect(res.body.estado).toBe("no_disponible");
+  });
+
+  test("rechaza el estado pausado", async () => {
+    const producto = await crearProducto();
+
+    const res = await request(app)
+      .put(`/api/productos/${producto.id_producto}`)
+      .send({ estado: "pausado" });
+
+    expect(res.status).toBe(400);
+    const actual = await Producto.findByPk(producto.id_producto);
+    expect(actual.estado).toBe("disponible");
   });
 
   test("reemplaza categorías y receta en el PUT", async () => {

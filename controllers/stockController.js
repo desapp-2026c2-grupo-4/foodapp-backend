@@ -29,6 +29,34 @@ const agregarStock = async (req, res, next) => {
   }
 };
 
+const reducirStock = async (req, res, next) => {
+  try {
+    const idSucursal = req.body.id_sucursal;
+    if (!sucursalPermitida(req.user, idSucursal)) return noAutorizadoSucursal(res);
+    const reduccion = await stockService.reducirStock({
+      ...req.body,
+      id_empleado: req.user.id_empleado,
+    });
+    res.status(201).json(reduccion);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+};
+
+const getReduccionesStock = async (req, res, next) => {
+  try {
+    const idSucursal = req.query.sucursal;
+    if (!idSucursal) return res.status(400).json({ error: "La query sucursal es obligatoria" });
+    if (!sucursalPermitida(req.user, idSucursal)) return noAutorizadoSucursal(res);
+    const reducciones = await stockService.listarReduccionesStock(idSucursal);
+    res.json(reducciones);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+};
+
 // GET /api/productos/:id/stock?sucursal=  -> stock derivado de la receta
 const getStockProducto = async (req, res, next) => {
   try {
@@ -45,4 +73,4 @@ const getStockProducto = async (req, res, next) => {
   }
 };
 
-module.exports = { getStock, agregarStock, getStockProducto };
+module.exports = { getStock, agregarStock, reducirStock, getReduccionesStock, getStockProducto };

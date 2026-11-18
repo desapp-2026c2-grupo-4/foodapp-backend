@@ -7,7 +7,16 @@ const validate = (schema, property = "body") => (req, res, next) => {
   if (error) {
     return res.status(400).json({ error: error.details.map((d) => d.message).join(", ") });
   }
-  req[property] = value;
+  if (property === "query") {
+    Object.defineProperty(req, "query", {
+      value,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+  } else {
+    req[property] = value;
+  }
   next();
 };
 

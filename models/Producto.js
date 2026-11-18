@@ -19,7 +19,7 @@ const Producto = sequelize.define("Producto", {
     type: DataTypes.STRING,
     allowNull: false,
     defaultValue: "disponible",
-    validate: { isIn: [["disponible", "no_disponible", "pausado"]] },
+    validate: { isIn: [["disponible", "no_disponible"]] },
   },
 }, {
   tableName: "productos",

@@ -23,7 +23,10 @@ const CategoriaProducto = sequelize.define("CategoriaProducto", {
   },
 }, {
   tableName: "categoria_producto",
-  timestamps: false,
+  timestamps: true,
+  createdAt: false,
+  updatedAt: false,
+  paranoid: true,
   indexes: [
     { unique: true, fields: ["id_producto", "id_categoria"] },
   ],

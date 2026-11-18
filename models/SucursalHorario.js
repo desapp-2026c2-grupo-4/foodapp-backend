@@ -29,7 +29,10 @@ const SucursalHorario = sequelize.define("SucursalHorario", {
   },
 }, {
   tableName: "sucursal_horarios",
-  timestamps: false,
+  timestamps: true,
+  createdAt: false,
+  updatedAt: false,
+  paranoid: true,
   indexes: [
     { unique: true, fields: ["id_sucursal", "dia_semana"] },
   ],

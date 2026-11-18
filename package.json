@@ -9,6 +9,7 @@
     "db:sync": "node scripts/sync.js",
     "db:sync:force": "node scripts/sync.js --force",
     "db:seed": "node scripts/seed.js",
+    "db:seed:demo": "node scripts/seed-demo.js",
     "test": "jest --runInBand",
     "test:coverage": "jest --runInBand --coverage"
   },

@@ -11,6 +11,7 @@ const direccionRoutes = require("./direccionRoutes");
 router.use("/:id/direcciones", direccionRoutes);
 router.post("/", autenticar, requireAdmin, validate(createClienteSchema), controller.createCliente);
 router.get("/", autenticar, requireAdmin, controller.getClientes);
+router.get("/resumen", autenticar, requireAdmin, controller.getResumenClientes);
 router.get("/:id", autenticar, requireClienteSelfOrAdmin, controller.getClienteById);
 router.put("/:id", autenticar, requireClienteSelfOrAdmin, validate(updateClienteSchema), controller.updateCliente);
 router.put("/:id/password", autenticar, requireClienteSelfOrAdmin, validate(cambiarPasswordSchema), controller.cambiarPassword);
