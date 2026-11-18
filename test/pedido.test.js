@@ -1,6 +1,7 @@
 const { request, app } = require("./helpers/request");
 const { Cliente, Direccion, Sucursal, Producto, Opcional, MateriaPrima, ProductoMateriaPrima, MateriaPrimaSucursal, Pedido, SucursalHorario } = require("../models");
 const { diaYMinutoLocal } = require("../utils/schedule");
+const { calcularTiempoEstimadoEntrega } = require("../services/pedidoService");
 const { resetDb, closeDb } = require("./db_utils");
 
 // Direcciones de CABA con coordenadas reales (para auto-asignación por cercanía)
@@ -22,6 +23,8 @@ beforeAll(async () => {
   const reg = await request(app).post("/api/auth/register").send({
     nombre: "Juan",
     apellido: "Pérez",
+    tipo_doc: "DNI",
+    dni: "30111222",
     email: "juan.perez@example.com",
     password: "secreto123",
   });
@@ -56,6 +59,11 @@ const basePedido = (extras = {}) => ({
 const crearPedido = (extras = {}) =>
   request(app).post("/api/pedidos").send(basePedido(extras));
 
+const stockEnSucursal = async (id_sucursal = sucCerca.id_sucursal) =>
+  (await MateriaPrimaSucursal.findOne({
+    where: { id_materia_prima: materia.id_materia_prima, id_sucursal },
+  })).stock;
+
 describe("POST /api/pedidos (creación)", () => {
   test("crea pedido con sucursal explícita: 201, Pendiente, importe e historial", async () => {
     const res = await crearPedido({ id_sucursal: sucCerca.id_sucursal });
@@ -67,6 +75,8 @@ describe("POST /api/pedidos (creación)", () => {
     expect(res.body.detalles).toHaveLength(1);
     expect(parseFloat(res.body.detalles[0].precio)).toBe(5500.00);
     expect(res.body.historial.map((h) => h.estado)).toEqual(["Pendiente"]);
+    expect(res.body.distancia_km).toBe(0);
+    expect(res.body.tiempo_estimado_min).toBe(20);
   });
 
   test("sin id_sucursal asigna la más cercana con stock (no la lejana)", async () => {
@@ -140,6 +150,8 @@ describe("POST /api/pedidos (creación)", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.id_sucursal).toBe(sucMedia.id_sucursal);
+    expect(res.body.distancia_km).toBe(1.11);
+    expect(res.body.tiempo_estimado_min).toBe(22);
   });
 
   test("rechaza sucursal explícita si la dirección no tiene coordenadas", async () => {
@@ -289,6 +301,16 @@ describe("GET pedidos y detalle", () => {
     expect(res.status).toBe(200);
     expect(res.body.length).toBeGreaterThan(0);
     expect(res.body.every((p) => p.id_cliente === cliente.id_cliente)).toBe(true);
+    expect(res.body.every((p) => typeof p.tiempo_estimado_min === "number")).toBe(true);
+  });
+
+  test("GET /api/pedidos/:id incluye distancia y tiempo estimado", async () => {
+    const creado = await crearPedido({ id_sucursal: sucCerca.id_sucursal });
+    const res = await request(app).get(`/api/pedidos/${creado.body.id_pedido}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.distancia_km).toBe(0);
+    expect(res.body.tiempo_estimado_min).toBe(20);
   });
 
   test("GET /api/pedidos/:id trae detalle con importe calculado coincidente", async () => {
@@ -414,6 +436,82 @@ describe("Cancelación", () => {
     expect(trasCancelar).toBe(antes);
   });
 
+  test("cancelar un pedido Confirmado repone todo el stock", async () => {
+    const antes = await stockEnSucursal();
+    const creado = await crearPedido({
+      id_sucursal: sucCerca.id_sucursal,
+      detalles: [{ id_producto: producto.id_producto, cantidad: 2 }],
+    });
+    const id = creado.body.id_pedido;
+    await request(app).put(`/api/pedidos/${id}`).send({ estado: "Confirmado" });
+
+    const res = await request(app).put(`/api/pedidos/${id}`).send({ estado: "Cancelado" });
+
+    expect(res.status).toBe(200);
+    expect(await stockEnSucursal()).toBe(antes);
+  });
+
+  test("cancelar en Preparando sin ítems preparados repone todo el stock", async () => {
+    const antes = await stockEnSucursal();
+    const creado = await crearPedido({
+      id_sucursal: sucCerca.id_sucursal,
+      detalles: [{ id_producto: producto.id_producto, cantidad: 2 }],
+    });
+    const id = creado.body.id_pedido;
+    await request(app).put(`/api/pedidos/${id}`).send({ estado: "Confirmado" });
+    await request(app).put(`/api/pedidos/${id}`).send({ estado: "Preparando" });
+
+    const res = await request(app).put(`/api/pedidos/${id}`).send({ estado: "Cancelado" });
+
+    expect(res.status).toBe(200);
+    expect(await stockEnSucursal()).toBe(antes);
+  });
+
+  test("cancelar en Preparando repone solo los ítems no preparados", async () => {
+    const antes = await stockEnSucursal();
+    const creado = await crearPedido({
+      id_sucursal: sucCerca.id_sucursal,
+      detalles: [
+        { id_producto: producto.id_producto, cantidad: 1 },
+        { id_producto: producto.id_producto, cantidad: 2, observaciones: "sin sal" },
+      ],
+    });
+    const id = creado.body.id_pedido;
+    const preparado = creado.body.detalles.find((d) => !d.observaciones);
+    await request(app).put(`/api/pedidos/${id}`).send({ estado: "Confirmado" });
+    await request(app).put(`/api/pedidos/${id}`).send({ estado: "Preparando" });
+    await request(app)
+      .put(`/api/pedidos/${id}/detalles/${preparado.id_detalle}`)
+      .send({ preparado: true });
+
+    const res = await request(app).put(`/api/pedidos/${id}`).send({ estado: "Cancelado" });
+
+    expect(res.status).toBe(200);
+    // La línea preparada (cantidad 1) no se repone; la no preparada (cantidad 2) sí.
+    expect(await stockEnSucursal()).toBe(antes - 1);
+  });
+
+  test("cancelar en En camino no repone stock", async () => {
+    const antes = await stockEnSucursal();
+    const creado = await crearPedido({
+      id_sucursal: sucCerca.id_sucursal,
+      detalles: [{ id_producto: producto.id_producto, cantidad: 2 }],
+    });
+    const id = creado.body.id_pedido;
+    const detalle = creado.body.detalles[0];
+    await request(app).put(`/api/pedidos/${id}`).send({ estado: "Confirmado" });
+    await request(app).put(`/api/pedidos/${id}`).send({ estado: "Preparando" });
+    const preparado = await request(app)
+      .put(`/api/pedidos/${id}/detalles/${detalle.id_detalle}`)
+      .send({ preparado: true });
+    expect(preparado.body.pedidoAvanzadoA).toBe("En camino");
+
+    const res = await request(app).put(`/api/pedidos/${id}`).send({ estado: "Cancelado" });
+
+    expect(res.status).toBe(200);
+    expect(await stockEnSucursal()).toBe(antes - 2);
+  });
+
   test("no se puede cancelar un pedido Entregado", async () => {
     const creado = await crearPedido({ id_sucursal: sucCerca.id_sucursal });
     for (const estado of ["Confirmado", "Preparando", "En camino", "Entregado"]) {
@@ -507,5 +605,24 @@ describe("PUT /api/pedidos/:id/detalles/:idDetalle (preparado)", () => {
       .send({ preparado: true });
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe("Cálculo de tiempo estimado de entrega", () => {
+  test("suma 20 minutos base al viaje a 40 km/h", () => {
+    const resultado = calcularTiempoEstimadoEntrega({
+      direccion: { latitud: -34.6083, longitud: -58.3712 },
+      sucursal: { latitud: -34.6183, longitud: -58.3712 },
+    });
+
+    expect(resultado.distancia_km).toBe(1.11);
+    expect(resultado.tiempo_estimado_min).toBe(22);
+  });
+
+  test("devuelve null cuando faltan coordenadas", () => {
+    expect(calcularTiempoEstimadoEntrega({ direccion: {}, sucursal: {} })).toEqual({
+      distancia_km: null,
+      tiempo_estimado_min: null,
+    });
   });
 });

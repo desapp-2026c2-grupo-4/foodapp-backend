@@ -1,6 +1,7 @@
 const { sequelize, Producto, Categoria, MateriaPrima, CategoriaProducto, ProductoMateriaPrima, Opcional } = require("../models");
 const stockService = require("../services/stockService");
 const { esStaff, sucursalPermitida } = require("../utils/authz");
+const sincronizarRelacion = require("../utils/sincronizarRelacion");
 
 const includes = [
   { model: Categoria, as: "categorias", through: { attributes: [] } },
@@ -107,26 +108,30 @@ const updateProducto = async (req, res, next) => {
     if (Object.keys(datos).length > 0) {
       await producto.update(datos, { transaction: t });
     }
-    // Sincronizar categorías (reemplaza las actuales por las enviadas)
     if (categorias !== undefined) {
-      await CategoriaProducto.destroy({ where: { id_producto: producto.id_producto }, transaction: t });
-      for (const id_categoria of categorias) {
-        await CategoriaProducto.create(
-          { id_producto: producto.id_producto, id_categoria },
-          { transaction: t }
-        );
-      }
+      await sincronizarRelacion({
+        modelo: CategoriaProducto,
+        where: { id_producto: producto.id_producto },
+        items: categorias,
+        clave: (item) => (typeof item === "object" ? item.id_categoria : item),
+        crear: (id_categoria) => ({ id_categoria }),
+        actualizar: () => ({}),
+        transaction: t,
+      });
     }
-    // Sincronizar receta (materias primas) reemplazando las actuales
     if (materiasPrimas !== undefined) {
-      await ProductoMateriaPrima.destroy({ where: { id_producto: producto.id_producto }, transaction: t });
-      for (const item of materiasPrimas) {
-        await ProductoMateriaPrima.create({
-          id_producto: producto.id_producto,
+      await sincronizarRelacion({
+        modelo: ProductoMateriaPrima,
+        where: { id_producto: producto.id_producto },
+        items: materiasPrimas,
+        clave: (item) => item.id_materia_prima,
+        crear: (item) => ({
           id_materia_prima: item.id_materia_prima,
           cantidad: item.cantidad,
-        }, { transaction: t });
-      }
+        }),
+        actualizar: (item) => ({ cantidad: item.cantidad }),
+        transaction: t,
+      });
     }
 
     await t.commit();

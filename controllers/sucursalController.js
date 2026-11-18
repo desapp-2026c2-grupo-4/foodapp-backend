@@ -1,5 +1,7 @@
 const { Sucursal, SucursalHorario, sequelize } = require("../models");
 const { abiertaAhora } = require("../utils/schedule");
+const parametroService = require("../services/parametroService");
+const sincronizarRelacion = require("../utils/sincronizarRelacion");
 
 const includeHorarios = [{ model: SucursalHorario, as: "horarios", attributes: ["id_horario", "dia_semana", "hora_apertura", "hora_cierre"] }];
 
@@ -59,18 +61,23 @@ const updateSucursal = async (req, res, next) => {
       await sucursal.update(datos, { transaction: t });
     }
     if (tocaHorarios) {
-      await SucursalHorario.destroy({ where: { id_sucursal: sucursal.id_sucursal }, transaction: t });
-      if (Array.isArray(req.body.horarios) && req.body.horarios.length > 0) {
-        await SucursalHorario.bulkCreate(
-          req.body.horarios.map((h) => ({
-            id_sucursal: sucursal.id_sucursal,
-            dia_semana: h.dia_semana,
-            hora_apertura: h.hora_apertura,
-            hora_cierre: h.hora_cierre,
-          })),
-          { transaction: t }
-        );
-      }
+      const horarios = Array.isArray(req.body.horarios) ? req.body.horarios : [];
+      await sincronizarRelacion({
+        modelo: SucursalHorario,
+        where: { id_sucursal: sucursal.id_sucursal },
+        items: horarios,
+        clave: (h) => h.dia_semana,
+        crear: (h) => ({
+          dia_semana: h.dia_semana,
+          hora_apertura: h.hora_apertura,
+          hora_cierre: h.hora_cierre,
+        }),
+        actualizar: (h) => ({
+          hora_apertura: h.hora_apertura,
+          hora_cierre: h.hora_cierre,
+        }),
+        transaction: t,
+      });
     }
 
     await t.commit();
@@ -88,12 +95,15 @@ const createSucursal = async (req, res, next) => {
   const t = await sequelize.transaction();
   try {
     const { nombre, estado, telefono, horarios, calle, altura, ciudad, provincia, codigo_postal, latitud, longitud, radio_km } = req.body;
+    const radioKmFinal = radio_km !== undefined
+      ? radio_km
+      : await parametroService.obtenerNumero("radio_cobertura_default_km", 2);
     if (!nombre || !calle || !altura || !ciudad || !provincia) {
       await t.rollback();
       return res.status(400).json({ error: "nombre, calle, altura, ciudad y provincia son obligatorios" });
     }
     const sucursal = await Sucursal.create(
-      { nombre, estado, telefono, calle, altura, ciudad, provincia, codigo_postal: codigo_postal || null, latitud, longitud, radio_km },
+      { nombre, estado, telefono, calle, altura, ciudad, provincia, codigo_postal: codigo_postal || null, latitud, longitud, radio_km: radioKmFinal },
       { transaction: t }
     );
     if (Array.isArray(horarios) && horarios.length > 0) {

@@ -86,6 +86,9 @@ const updateEmpleado = async (req, res, next) => {
 
 const deleteEmpleado = async (req, res, next) => {
   try {
+    if (Number(req.params.id) === req.user.id_empleado) {
+      return res.status(403).json({ error: "No podés dar de baja tu propia cuenta" });
+    }
     const empleado = await Empleado.findByPk(req.params.id);
     if (!empleado) return res.status(404).json({ error: "Empleado no encontrado" });
     // Baja lógica: se libera el email único (para poder reutilizarlo) y se oculta el registro

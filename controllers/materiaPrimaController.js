@@ -1,4 +1,5 @@
 const { MateriaPrima } = require("../models");
+const parametroService = require("../services/parametroService");
 
 const getMateriasPrimas = async (req, res, next) => {
   try {
@@ -22,6 +23,9 @@ const getMateriaPrimaById = async (req, res, next) => {
 const createMateriaPrima = async (req, res, next) => {
   try {
     const { nombre, estado, stock_minimo } = req.body;
+    const stockMinimoFinal = stock_minimo !== undefined
+      ? stock_minimo
+      : await parametroService.obtenerNumero("stock_minimo_default", 0);
     // Si existe una materia prima dada de baja con el mismo nombre, se reutiliza (reactiva)
     const existente = await MateriaPrima.findOne({ where: { nombre }, paranoid: false });
     if (existente) {
@@ -35,7 +39,7 @@ const createMateriaPrima = async (req, res, next) => {
       }
       return res.status(409).json({ error: "Ya existe una materia prima con ese nombre" });
     }
-    const materia = await MateriaPrima.create({ nombre, estado, stock_minimo });
+    const materia = await MateriaPrima.create({ nombre, estado, stock_minimo: stockMinimoFinal });
     res.status(201).json(materia);
   } catch (err) {
     if (err.name === "SequelizeUniqueConstraintError") {

@@ -21,7 +21,7 @@ const createPromocionSchema = Joi.object({
   fecha_inicio: fechaISO.required(),
   fecha_fin: fechaISO.required(),
   activa: Joi.boolean(),
-  productos: Joi.array().items(productoItem).min(1).required(),
+  productos: Joi.array().items(productoItem).unique("id_producto").min(1).required(),
 });
 
 const updatePromocionSchema = Joi.object({
@@ -33,7 +33,7 @@ const updatePromocionSchema = Joi.object({
   fecha_inicio: fechaISO,
   fecha_fin: fechaISO,
   activa: Joi.boolean(),
-  productos: Joi.array().items(productoItem).min(1),
+  productos: Joi.array().items(productoItem).unique("id_producto").min(1),
 }).min(1);
 
 module.exports = { createPromocionSchema, updatePromocionSchema };

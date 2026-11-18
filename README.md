@@ -63,8 +63,12 @@ NODE_ENV=test npm run db:init
 De manera opcional, también podés cargar unos datos de prueba, llamados _seeders_, que vienen incluidos. A medida que el desarrollo continue, se podrían seguir agregando más datos que ayuden en las pruebas manuales. Para cargar los _seeders_, ejecutar el siguiente comando:
 
 ```shell
-# (Opcional) Carga los datos de prueba en la base de desarrollo.
+# (Opcional) Carga los datos de prueba mínimos en la base de desarrollo.
 npm run db:seed
+
+# (Opcional) Recrea la base y carga el dataset demo ampliado.
+# ADVERTENCIA: elimina los datos actuales de la base de desarrollo.
+npm run db:seed:demo
 ```
 
 > **Nota**  
@@ -72,15 +76,20 @@ npm run db:seed
 
 ### Credenciales de prueba
 
-Después de ejecutar `npm run db:seed`:
+Después de ejecutar `npm run db:seed:demo` (el seed mínimo `db:seed` crea solo ADMIN, EMPLEADO Centro y el cliente Juan Pérez):
 
 | Rol | Email | Contraseña |
 | --- | --- | --- |
 | ADMIN | `admin@altoque.com` | `admin123` |
-| EMPLEADO | `empleado@altoque.com` | `empleado123` |
+| EMPLEADO Centro | `empleado@altoque.com` | `empleado123` |
+| EMPLEADO Palermo | `empleado.palermo@altoque.com` | `empleado123` |
+| EMPLEADO Morón | `empleado.moron@altoque.com` | `empleado123` |
 | CLIENTE | `juan.perez@example.com` | `cliente123` |
+| CLIENTE | `maria.gomez@example.com` | `cliente123` |
+| CLIENTE | `carlos.lopez@example.com` | `cliente123` |
+| CLIENTE | `lucia.fernandez@example.com` | `cliente123` |
 
-El empleado de prueba queda asignado a la sucursal 1. Los clientes de prueba usan `cliente123`.
+Los clientes de prueba usan `cliente123`. El dataset demo asigna empleados a Centro, Palermo y Morón.
 
 ## :file_folder: Estructura de directorios
 

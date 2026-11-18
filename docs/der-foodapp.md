@@ -20,6 +20,7 @@ erDiagram
         serial id_categoria_producto PK "NOT NULL"
         integer id_producto FK, UK "NOT NULL; FK -> productos.id_producto; unique compuesto"
         integer id_categoria FK, UK "NOT NULL; FK -> categorias.id_categoria; unique compuesto"
+        timestamptz deleted_at "NULL"
     }
     categorias {
         serial id_categoria PK "NOT NULL"
@@ -126,6 +127,7 @@ erDiagram
         integer id_producto PK, FK "NOT NULL; FK -> productos.id_producto"
         integer id_materia_prima PK, FK "NOT NULL; FK -> materias_primas.id_materia_prima"
         integer cantidad "NOT NULL; default 1"
+        timestamptz deleted_at "NULL"
     }
     producto_pedido {
         serial id_producto_pedido PK "NOT NULL"
@@ -148,6 +150,29 @@ erDiagram
         integer id_promocion FK, UK "NOT NULL; FK -> promociones.id_promocion; unique compuesto"
         integer id_producto FK, UK "NOT NULL; FK -> productos.id_producto; unique compuesto"
         integer cantidad "NOT NULL; default 1"
+        timestamptz deleted_at "NULL"
+    }
+    reducciones_stock {
+        serial id_reduccion_stock PK "NOT NULL"
+        integer id_sucursal FK "NOT NULL; FK -> sucursales.id_sucursal; on delete restrict"
+        integer id_materia_prima FK "NOT NULL; FK -> materias_primas.id_materia_prima; on delete restrict"
+        integer id_empleado FK "NOT NULL; FK -> empleados.id_empleado; on delete restrict"
+        integer cantidad "NOT NULL; check >= 1"
+        integer stock_anterior "NOT NULL; check >= 0"
+        integer stock_nuevo "NOT NULL; check >= 0"
+        varchar motivo "255; NOT NULL"
+        timestamptz fecha_hora "NOT NULL; default now()"
+    }
+    parametros {
+        serial id_parametro PK "NOT NULL"
+        varchar clave "255; NOT NULL; unique"
+        varchar valor "255; NOT NULL"
+        varchar tipo "255; NOT NULL; default 'string'"
+        varchar grupo "255; NOT NULL; default 'general'"
+        varchar descripcion "255; NULL"
+        integer id_empleado_actualizacion FK "NULL; FK -> empleados.id_empleado; on delete set null"
+        timestamptz created_at "NOT NULL"
+        timestamptz updated_at "NOT NULL"
     }
     promociones {
         serial id_promocion PK "NOT NULL"
@@ -169,6 +194,7 @@ erDiagram
         smallint dia_semana "NOT NULL"
         time hora_apertura "NOT NULL"
         time hora_cierre "NOT NULL"
+        timestamptz deleted_at "NULL"
     }
     sucursales {
         serial id_sucursal PK "NOT NULL"
@@ -199,6 +225,10 @@ erDiagram
     pedidos ||--|{ historial_pedidos : "id_pedido"
     materias_primas ||--|{ materia_prima_sucursal : "id_materia_prima"
     sucursales ||--|{ materia_prima_sucursal : "id_sucursal"
+    materias_primas ||--o{ reducciones_stock : "id_materia_prima"
+    sucursales ||--o{ reducciones_stock : "id_sucursal"
+    empleados ||--o{ reducciones_stock : "id_empleado"
+    empleados ||--o{ parametros : "id_empleado_actualizacion"
     productos ||--|{ opcionales : "id_producto"
     clientes ||--|{ pedidos : "id_cliente"
     direcciones ||--|{ pedidos : "id_direccion"

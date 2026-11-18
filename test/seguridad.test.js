@@ -142,6 +142,14 @@ describe("Catálogo público y stock privado", () => {
 
     const empleado = await requestAs(tokenEmpleadoA).get(`/api/stock?sucursal=${sucA.id_sucursal}`);
     expect(empleado.status).toBe(200);
+
+    const clienteReduccion = await requestAs(tokenClienteA).post("/api/stock/reducciones").send({
+      id_sucursal: sucA.id_sucursal,
+      id_materia_prima: materia.id_materia_prima,
+      cantidad: 1,
+      motivo: "Ajuste",
+    });
+    expect(clienteReduccion.status).toBe(403);
   });
 
   test("el stock derivado en productos no es público", async () => {
@@ -231,6 +239,41 @@ describe("Alcance por sucursal del empleado", () => {
     expect(ajeno.status).toBe(403);
   });
 
+  test("empleado reduce stock solo de su sucursal y ve su historial", async () => {
+    const ajeno = await requestAs(tokenEmpleadoA).post("/api/stock/reducciones").send({
+      id_sucursal: sucB.id_sucursal,
+      id_materia_prima: materia.id_materia_prima,
+      cantidad: 1,
+      motivo: "Vencida",
+    });
+    expect(ajeno.status).toBe(403);
+
+    const fila = await MateriaPrimaSucursal.findOne({
+      where: { id_sucursal: sucA.id_sucursal, id_materia_prima: materia.id_materia_prima },
+    });
+    const propio = await requestAs(tokenEmpleadoA).post("/api/stock/reducciones").send({
+      id_sucursal: sucA.id_sucursal,
+      id_materia_prima: materia.id_materia_prima,
+      cantidad: 2,
+      motivo: "Vencida",
+    });
+    expect(propio.status).toBe(201);
+    expect(propio.body.stock_nuevo).toBe(fila.stock - 2);
+
+    const historial = await requestAs(tokenEmpleadoA).get(
+      `/api/stock/reducciones?sucursal=${sucA.id_sucursal}`
+    );
+    expect(historial.status).toBe(200);
+    expect(historial.body.some((r) => r.id_reduccion_stock === propio.body.id_reduccion_stock)).toBe(true);
+    expect(historial.body[0]).toMatchObject({ motivo: "Vencida" });
+    expect(historial.body[0].empleado.id_empleado).toBe(empleadoA.id_empleado);
+
+    const historialAjeno = await requestAs(tokenEmpleadoA).get(
+      `/api/stock/reducciones?sucursal=${sucB.id_sucursal}`
+    );
+    expect(historialAjeno.status).toBe(403);
+  });
+
   test("sin sucursal asignada no puede operar stock ni pedidos", async () => {
     const stock = await requestAs(tokenEmpleadoSinSucursal).get(
       `/api/stock?sucursal=${sucA.id_sucursal}`
@@ -291,6 +334,83 @@ describe("Ownership de clientes y pedidos", () => {
   });
 });
 
+describe("Cancelación de pedidos por cliente", () => {
+  const crearPedido = (estado, cliente = clienteA, direccion = direccionA, sucursal = sucA) =>
+    Pedido.create({
+      id_cliente: cliente.id_cliente,
+      id_direccion: direccion.id_direccion,
+      id_sucursal: sucursal.id_sucursal,
+      estado,
+      importe: 0,
+    });
+
+  test("puede cancelar su propio pedido en Preparando", async () => {
+    const pedido = await crearPedido("Preparando");
+    const res = await requestAs(tokenClienteA)
+      .put(`/api/pedidos/${pedido.id_pedido}`)
+      .send({ estado: "Cancelado" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.estado).toBe("Cancelado");
+  });
+
+  test("puede cancelar su propio pedido en En camino", async () => {
+    const pedido = await crearPedido("En camino");
+    const res = await requestAs(tokenClienteA)
+      .put(`/api/pedidos/${pedido.id_pedido}`)
+      .send({ estado: "Cancelado" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.estado).toBe("Cancelado");
+  });
+
+  test("no puede cancelar un pedido en Listo", async () => {
+    const pedido = await crearPedido("Listo");
+    const res = await requestAs(tokenClienteA)
+      .put(`/api/pedidos/${pedido.id_pedido}`)
+      .send({ estado: "Cancelado" });
+
+    expect(res.status).toBe(400);
+  });
+
+  test("no puede cancelar un pedido entregado", async () => {
+    const pedido = await crearPedido("Entregado");
+    const res = await requestAs(tokenClienteA)
+      .put(`/api/pedidos/${pedido.id_pedido}`)
+      .send({ estado: "Cancelado" });
+
+    expect(res.status).toBe(400);
+  });
+
+  test("no puede cancelar un pedido ajeno", async () => {
+    const pedido = await crearPedido("Pendiente", clienteB, direccionB, sucB);
+    const res = await requestAs(tokenClienteA)
+      .put(`/api/pedidos/${pedido.id_pedido}`)
+      .send({ estado: "Cancelado" });
+
+    expect(res.status).toBe(403);
+  });
+
+  test("no puede avanzar el estado de su propio pedido", async () => {
+    const pedido = await crearPedido("Pendiente");
+    const res = await requestAs(tokenClienteA)
+      .put(`/api/pedidos/${pedido.id_pedido}`)
+      .send({ estado: "Confirmado" });
+
+    expect(res.status).toBe(403);
+    expect((await Pedido.findByPk(pedido.id_pedido)).estado).toBe("Pendiente");
+  });
+
+  test("no puede modificar el importe de su propio pedido", async () => {
+    const pedido = await crearPedido("Pendiente");
+    const res = await requestAs(tokenClienteA)
+      .put(`/api/pedidos/${pedido.id_pedido}`)
+      .send({ importe: 1 });
+
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("Rutas administrativas", () => {
   test("cliente y empleado no pueden crear categorías", async () => {
     expect((await requestAs(tokenClienteA).post("/api/categorias").send({ nombre: "X" })).status).toBe(403);
@@ -317,6 +437,22 @@ describe("Rutas administrativas", () => {
   test("admin puede consultar stock de cualquier sucursal", async () => {
     const res = await requestAs(tokenAdmin).get(`/api/stock?sucursal=${sucB.id_sucursal}`);
     expect(res.status).toBe(200);
+  });
+
+  test("admin puede reducir stock de cualquier sucursal", async () => {
+    const res = await requestAs(tokenAdmin).post("/api/stock/reducciones").send({
+      id_sucursal: sucB.id_sucursal,
+      id_materia_prima: materia.id_materia_prima,
+      cantidad: 1,
+      motivo: "Ajuste de administración",
+    });
+    expect(res.status).toBe(201);
+
+    const historial = await requestAs(tokenAdmin).get(
+      `/api/stock/reducciones?sucursal=${sucB.id_sucursal}`
+    );
+    expect(historial.status).toBe(200);
+    expect(historial.body.some((r) => r.id_reduccion_stock === res.body.id_reduccion_stock)).toBe(true);
   });
 
   test("sin token no se accede a pedidos, reportes ni clientes", async () => {

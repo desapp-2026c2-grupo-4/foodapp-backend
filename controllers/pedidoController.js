@@ -7,6 +7,7 @@ const { esAdmin, esEmpleado, esCliente, pedidoPermitido } = require("../utils/au
 // Flujo de estados en un solo sentido: Pendiente -> Confirmado -> Preparando -> En camino -> Entregado
 // No se permite volver a un estado anterior.
 const FLUJO_ESTADOS = ["Pendiente", "Confirmado", "Preparando", "En camino", "Entregado"];
+const ESTADOS_CANCELABLES_CLIENTE = ["Pendiente", "Confirmado", "Preparando", "En camino"];
 
 const getPedidos = async (req, res, next) => {
   try {
@@ -51,7 +52,7 @@ const getPedidos = async (req, res, next) => {
       ],
       order: [["id_pedido", "ASC"]],
     });
-    res.json(pedidos);
+    res.json(await Promise.all(pedidos.map((p) => pedidoService.serializarPedido(p))));
   } catch (err) {
     next(err);
   }
@@ -80,7 +81,7 @@ const getPedidoById = async (req, res, next) => {
     if (!pedidoPermitido(req.user, pedido)) {
       return res.status(403).json({ error: "No podés acceder a este pedido" });
     }
-    res.json(pedido);
+    res.json(await pedidoService.serializarPedido(pedido));
   } catch (err) {
     next(err);
   }
@@ -94,6 +95,11 @@ const updatePedido = async (req, res, next) => {
     if (!pedidoPermitido(req.user, pedido)) {
       await t.rollback();
       return res.status(403).json({ error: "No podés modificar este pedido" });
+    }
+
+    if (esCliente(req.user) && (req.body.importe !== undefined || req.body.estado !== "Cancelado")) {
+      await t.rollback();
+      return res.status(403).json({ error: "Como cliente solo podés cancelar tu pedido" });
     }
 
     const permitidos = ["estado", "importe"];
@@ -128,6 +134,10 @@ const updatePedido = async (req, res, next) => {
         return res.status(400).json({ error: `Transición no permitida: de "${estadoAnterior}" solo se puede avanzar a "${FLUJO_ESTADOS[idxAnterior + 1] || "—"}"` });
       }
     }
+    if (esCliente(req.user) && !ESTADOS_CANCELABLES_CLIENTE.includes(estadoAnterior)) {
+      await t.rollback();
+      return res.status(400).json({ error: `No podés cancelar un pedido en estado "${estadoAnterior}"` });
+    }
     await pedido.update(datos, { transaction: t });
 
     if (datos.estado && datos.estado !== estadoAnterior) {
@@ -138,14 +148,9 @@ const updatePedido = async (req, res, next) => {
       }, { transaction: t });
     }
 
-    // Al cancelar un pedido se repone el stock de materias primas consumido
-    if (datos.estado === "Cancelado" && estadoAnterior !== "Cancelado" && pedido.id_sucursal) {
-      const lineas = await DetallePedido.findAll({
-        where: { id_pedido: pedido.id_pedido },
-        attributes: ["id_producto", "cantidad"],
-        transaction: t,
-      });
-      await stockService.reponerStock(lineas, pedido.id_sucursal, t);
+    // Al cancelar se repone solo el stock de los ítems que no se prepararon
+    if (datos.estado === "Cancelado" && estadoAnterior !== "Cancelado") {
+      await pedidoService.reponerStockAlCancelar(pedido, estadoAnterior, t);
     }
 
     // Garantizar consistencia de importe = SUM(cantidad*precio) de DetallePedido
@@ -177,7 +182,7 @@ const updatePedido = async (req, res, next) => {
         { model: HistorialPedido, as: "historial" },
       ],
     });
-    res.json(actualizado);
+    res.json(await pedidoService.serializarPedido(actualizado));
   } catch (err) {
     await t.rollback();
     next(err);
@@ -339,7 +344,7 @@ const createPedido = async (req, res, next) => {
         { model: HistorialPedido, as: "historial" },
       ],
     });
-    res.status(201).json(creado);
+    res.status(201).json(await pedidoService.serializarPedido(creado));
   } catch (err) {
     await t.rollback();
     next(err);
